@@ -18,6 +18,7 @@ from __future__ import annotations
 import bisect
 import html
 import json
+import math
 import re
 import sqlite3
 import subprocess
@@ -38,6 +39,7 @@ DEFAULT_LOCATION_DEGREES = 0.005  # ~0.5 km; start a new place once you move thi
 DEFAULT_LIBRARY = Path.home() / "Pictures" / "Photos Library.photoslibrary"
 DEFAULT_THUMB_SIZE = 400
 DEFAULT_INHERIT_MINUTES = 5
+DEFAULT_GPS_NAME_KM = 0.1
 LINK_MODES = ("thumb", "preview", "original", "photos", "none")
 
 _TIERS = (("Pro Max", 3), ("Pro", 2), ("Plus", 1))
@@ -267,19 +269,53 @@ def _inherit_locations(photos: list[Photo], minutes: int) -> None:
             photo.inherited_coord = best[1].coord
 
 
+def _name_from_gps(photos: list[Photo], km: float) -> None:
+    """Name a GPS-only photo after the nearest located photo within ``km``.
+
+    Keeps the photo's own coordinates; only borrows a place name. A grid keeps
+    this near-linear even for tens of thousands of photos.
+    """
+    if km <= 0:
+        return
+    labeled = [p for p in photos if p.coord is not None and location_label(p) != UNKNOWN]
+    targets = [p for p in photos if p.coord is not None and location_label(p) == UNKNOWN]
+    if not labeled or not targets:
+        return
+    cell = km / 111.0
+    grid: dict[tuple[int, int], list[Photo]] = {}
+    for photo in labeled:
+        lat, lon = photo.coord
+        grid.setdefault((math.floor(lat / cell), math.floor(lon / cell)), []).append(photo)
+    for photo in targets:
+        lat, lon = photo.coord
+        ci, cj = math.floor(lat / cell), math.floor(lon / cell)
+        best: tuple[float, Photo] | None = None
+        for di in range(-2, 3):
+            for dj in range(-2, 3):
+                for other in grid.get((ci + di, cj + dj), ()):
+                    distance = _distance_km(photo.coord, other.coord)
+                    if distance <= km and (best is None or distance < best[0]):
+                        best = (distance, other)
+        if best is not None:
+            photo.inherited_location = location_label(best[1])
+
+
 def select_photos(
     photos: Iterable[Photo],
     windows: list[tuple[str, str]] | None = None,
     owner: bool = True,
     keep_noise: bool = False,
-    inherit_minutes: int = 5,
+    inherit_minutes: int = DEFAULT_INHERIT_MINUTES,
+    gps_name_km: float = DEFAULT_GPS_NAME_KM,
 ) -> list[Photo]:
     """Pick the photos to journalize.
 
     With ``owner`` (the default) only the inferred owner-phone camera photos are
-    kept; otherwise every camera photo is kept. Photos with no location adopt the
-    location of the nearest-in-time located photo within ``inherit_minutes`` —
-    from the owner's phone only when ``owner`` is set, from any camera otherwise.
+    kept; otherwise every camera photo is kept. A photo with no location adopts
+    the nearest-in-time located photo's place within ``inherit_minutes`` (owner's
+    phone only when ``owner`` is set, any camera otherwise). A photo with GPS but
+    no place name is named after the nearest located photo within
+    ``gps_name_km`` kilometers (0 disables).
     """
     photos = list(photos)
     if owner:
@@ -300,6 +336,7 @@ def select_photos(
             if is_camera_photo(photo) and (keep_noise or not is_noise(photo))
         ]
     _inherit_locations(eligible, inherit_minutes)
+    _name_from_gps(eligible, gps_name_km)
 
     seen: set[tuple[str, str | None]] = set()
     deduped: list[Photo] = []
@@ -361,6 +398,15 @@ def location_label(photo: Photo) -> str:
 def _distance_degrees(a: tuple[float, float], b: tuple[float, float]) -> float:
     """Euclidean distance in degrees; good enough to detect a ~0.5 km move."""
     return ((a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2) ** 0.5
+
+
+def _distance_km(a: tuple[float, float], b: tuple[float, float]) -> float:
+    """Great-circle distance in kilometers (haversine)."""
+    lat1, lon1 = math.radians(a[0]), math.radians(a[1])
+    lat2, lon2 = math.radians(b[0]), math.radians(b[1])
+    dlat, dlon = lat2 - lat1, lon2 - lon1
+    h = math.sin(dlat / 2) ** 2 + math.cos(lat1) * math.cos(lat2) * math.sin(dlon / 2) ** 2
+    return 2 * 6371.0 * math.asin(min(1.0, math.sqrt(h)))
 
 
 def normalize(text: str) -> str:
@@ -1141,11 +1187,13 @@ def build_journal(
     owner_name: set[str] | None = None,
     owner: bool = True,
     inherit_minutes: int = DEFAULT_INHERIT_MINUTES,
+    gps_name_km: float = DEFAULT_GPS_NAME_KM,
 ) -> str:
     """Select the photos and render the full journal."""
     photos = list(photos)
     windows = infer_owner_windows(photos) if owner else []
-    selected = select_photos(photos, windows, owner, keep_noise, inherit_minutes)
+    selected = select_photos(photos, windows, owner, keep_noise, inherit_minutes,
+                             gps_name_km)
     batches = build_batches(selected, gap_minutes, location_degrees, owner_name)
     renderer = render_html if html else render
     return renderer(batches, windows, similarity, link, library, thumb_dir,
