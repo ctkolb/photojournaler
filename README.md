@@ -68,13 +68,17 @@ caption cluster.
 ## What gets included
 
 - **Only your phone.** Your phone is inferred from the data (see below); other
-  people's phones and DSLRs are dropped.
+  people's phones and DSLRs are dropped. Pass `--no-owner` to include every
+  camera instead.
 - **Only camera photos.** Screenshots, screen recordings, saved GIFs, and images
   received via Messages/WhatsApp/etc. are excluded.
 - **No clutter.** Low-value shots — documents, barcodes, receipts, menus, and
   boxes — are dropped (`--keep-junk` keeps them).
 - **No duplicates.** Album-export copies are collapsed so counts reflect real
   captures.
+- **Location from nearby shots.** A photo with no location adopts the location of
+  the nearest located photo within `--inherit-minutes` (default 5; `0` disables)
+  — from your phone only, or from any camera with `--no-owner`.
 
 ## How the journal is built
 
@@ -141,6 +145,8 @@ counts. Anything without a local file falls back to the `photos` scheme.
 | `--link MODE` | Link each count: `thumb`, `preview`, `original`, `photos`, `none` (default: `thumb`) |
 | `--library PATH` | Photos library used to resolve links (default: `~/Pictures/Photos Library.photoslibrary`) |
 | `--thumb-size N` | Long-edge pixels for `--link thumb` (default: 400) |
+| `--no-owner` | Include every camera, not just the owner's phone |
+| `--inherit-minutes N` | Give a location-less photo the nearest located photo's place within N minutes (default: 5; `0` disables) |
 | `--keep-junk` | Keep low-value shots (documents, barcodes, receipts, menus, boxes) |
 | `--no-narrative` | Omit the per-day story |
 | `--owner-name NAME` | Person to omit from `with …` (the journal owner; repeatable) |
