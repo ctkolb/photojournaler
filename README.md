@@ -1,5 +1,7 @@
 # PhotosMetadata
 
+[![CI](https://github.com/ctkolb/PhotosMetadata/actions/workflows/ci.yml/badge.svg)](https://github.com/ctkolb/PhotosMetadata/actions/workflows/ci.yml)
+
 Export rich metadata from a macOS Photos library (including iCloud Photos) to
 **JSON**, **CSV**, and **SQLite**.
 
@@ -120,3 +122,13 @@ library, so it runs anywhere in well under a second.
 .venv/bin/pip install -r requirements-dev.txt
 .venv/bin/python -m pytest
 ```
+
+## Continuous integration
+
+`.github/workflows/ci.yml` runs the test suite on every push and pull request
+targeting `main`, on a macOS runner (required, since importing `osxphotos`
+needs macOS). The single job is named **`test`**; that name is the required
+status check enforced by branch protection.
+
+To block merges to `main` until `test` passes, create a repository ruleset (see
+[`docs/branch-protection.md`](docs/branch-protection.md)).
