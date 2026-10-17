@@ -39,7 +39,7 @@ DEFAULT_LOCATION_DEGREES = 0.005  # ~0.5 km; start a new place once you move thi
 DEFAULT_LIBRARY = Path.home() / "Pictures" / "Photos Library.photoslibrary"
 DEFAULT_THUMB_SIZE = 400
 DEFAULT_INHERIT_MINUTES = 5
-DEFAULT_GPS_NAME_KM = 0.1
+DEFAULT_LOCATION_GUESS_KM = 0.1
 LINK_MODES = ("thumb", "preview", "original", "photos", "none")
 
 _TIERS = (("Pro Max", 3), ("Pro", 2), ("Plus", 1))
@@ -306,7 +306,7 @@ def select_photos(
     owner: bool = True,
     keep_noise: bool = False,
     inherit_minutes: int = DEFAULT_INHERIT_MINUTES,
-    gps_name_km: float = DEFAULT_GPS_NAME_KM,
+    location_guess_km: float = DEFAULT_LOCATION_GUESS_KM,
 ) -> list[Photo]:
     """Pick the photos to journalize.
 
@@ -315,7 +315,7 @@ def select_photos(
     the nearest-in-time located photo's place within ``inherit_minutes`` (owner's
     phone only when ``owner`` is set, any camera otherwise). A photo with GPS but
     no place name is named after the nearest located photo within
-    ``gps_name_km`` kilometers (0 disables).
+    ``location_guess_km`` kilometers (0 disables).
     """
     photos = list(photos)
     if owner:
@@ -336,7 +336,7 @@ def select_photos(
             if is_camera_photo(photo) and (keep_noise or not is_noise(photo))
         ]
     _inherit_locations(eligible, inherit_minutes)
-    _name_from_gps(eligible, gps_name_km)
+    _name_from_gps(eligible, location_guess_km)
 
     seen: set[tuple[str, str | None]] = set()
     deduped: list[Photo] = []
@@ -1187,13 +1187,13 @@ def build_journal(
     owner_name: set[str] | None = None,
     owner: bool = True,
     inherit_minutes: int = DEFAULT_INHERIT_MINUTES,
-    gps_name_km: float = DEFAULT_GPS_NAME_KM,
+    location_guess_km: float = DEFAULT_LOCATION_GUESS_KM,
 ) -> str:
     """Select the photos and render the full journal."""
     photos = list(photos)
     windows = infer_owner_windows(photos) if owner else []
     selected = select_photos(photos, windows, owner, keep_noise, inherit_minutes,
-                             gps_name_km)
+                             location_guess_km)
     batches = build_batches(selected, gap_minutes, location_degrees, owner_name)
     renderer = render_html if html else render
     return renderer(batches, windows, similarity, link, library, thumb_dir,

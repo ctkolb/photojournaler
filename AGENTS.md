@@ -74,16 +74,16 @@ keep the steps separable and covered by `tests/test_journal.py`.
    newer generation, then tier (`Pro Max` > `Pro` > `Plus` > base). Each window
    starts on the first date that model appears. Non-phones (Canon, Nikon,
    `iPhone SE`, …) never become the owner's.
-2. **Selection** — `select_photos(photos, windows, owner, keep_noise, inherit_minutes, gps_name_km)`.
+2. **Selection** — `select_photos(photos, windows, owner, keep_noise, inherit_minutes, location_guess_km)`.
    Keeps camera photos (by default only the owner's phone; `--no-speculative-id`
    keeps every camera). Excludes screenshots, screen recordings, saved/shared
    images (the `source` field, e.g. `Messages`, `WhatsApp`), and low-value shots
    (`is_noise`). A photo with no location adopts the location of the nearest
    located photo within `inherit_minutes` (default 5; 0 disables) — from the
    owner's phone only when `owner` is set, from any camera otherwise. A photo
-   with GPS but no place name is named after the nearest located photo within
-   `gps_name_km` kilometers (default 0.1; 0 disables), keeping its own
-   coordinates. De-duplicates album-export copies by `(date_original, camera_model)`.
+   with GPS but no place name has its place guessed from the nearest located
+   photo within `location_guess_km` kilometers (default 0.1; 0 disables), keeping
+   its own coordinates. De-duplicates album-export copies by `(date_original, camera_model)`.
 3. **Batching** — `build_batches(photos, gap_minutes, location_degrees)`.
    Groups consecutive photos at the same place when the idle gap is within
    `gap_minutes` (default 75) and the camera has not moved more than

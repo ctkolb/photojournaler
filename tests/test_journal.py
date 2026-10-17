@@ -224,7 +224,7 @@ def test_name_from_gps_respects_tolerance():
                     search_info={"city": "Dallas", "state_abbreviation": "TX"})
     far = photo("2024-01-01T10:05:00-06:00", "iPhone 13 Pro",
                 latitude=32.9, longitude=-96.8)  # ~13 km away
-    j.select_photos([labeled, far], windows, gps_name_km=0.1)
+    j.select_photos([labeled, far], windows, location_guess_km=0.1)
     assert far.inherited_location is None
 
 
@@ -235,7 +235,7 @@ def test_name_from_gps_zero_disables():
                     search_info={"city": "Dallas", "state_abbreviation": "TX"})
     target = photo("2024-01-01T10:05:00-06:00", "iPhone 13 Pro",
                    latitude=32.7801, longitude=-96.8001)
-    j.select_photos([labeled, target], windows, gps_name_km=0)
+    j.select_photos([labeled, target], windows, location_guess_km=0)
     assert target.inherited_location is None
 
 
@@ -741,7 +741,7 @@ def test_generate_config_writes_defaults(tmp_path):
     assert build_journal.main(["--generate-config", str(path)]) == 0
     data = yaml.safe_load(path.read_text())
     assert data["gap-minutes"] == 75
-    assert data["gps-name-km"] == 0.1
+    assert data["location-guess-km"] == 0.1
     assert data["speculative-id"] is True
     assert data["keep-junk"] is False
 

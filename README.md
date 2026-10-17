@@ -79,8 +79,8 @@ caption cluster.
 - **Location from nearby shots.** A photo with no location adopts the location of
   the nearest located photo within `--inherit-minutes` (default 5; `0` disables)
   — from your phone only, or from any camera with `--no-speculative-id`. A photo
-  that has GPS but no place name is named after the nearest located photo within
-  `--gps-name-km` kilometers (default 0.1; `0` disables).
+  that has GPS but no place name has its place guessed from the nearest located
+  photo within `--location-guess-km` kilometers (default 0.1; `0` disables).
 
 ## How the journal is built
 
@@ -152,7 +152,7 @@ config, and the config overrides the defaults.
 | `--thumb-size N` | Long-edge pixels for `--link thumb` (default: 400) |
 | `--speculative-id` / `--no-speculative-id` | Infer the owner's phone and keep only its photos (default), or `--no-…` to include every camera |
 | `--inherit-minutes N` | Give a location-less photo the nearest located photo's place within N minutes (default: 5; `0` disables) |
-| `--gps-name-km F` | Name a GPS-only photo after the nearest located photo within F km (default: 0.1; `0` disables) |
+| `--location-guess-km F` | Guess the place of a GPS-only photo from the nearest located photo within F km (default: 0.1; `0` disables) |
 | `--keep-junk` / `--no-keep-junk` | Keep low-value shots (documents, barcodes, receipts, menus, boxes); dropped by default |
 | `--narrative` / `--no-narrative` | Write the per-day story (default), or `--no-…` to omit |
 | `--owner-name NAME` | Person to omit from `with …` (the journal owner; repeatable) |
@@ -165,7 +165,7 @@ Any option can live in a YAML file, keyed by the flag name:
 ```yaml
 gap-minutes: 75
 speculative-id: true
-gps-name-km: 0.1
+location-guess-km: 0.1
 owner-name: ["Your Name"]
 ```
 

@@ -22,7 +22,7 @@ import yaml
 
 from photosmeta.journal import (
     DEFAULT_GAP_MINUTES,
-    DEFAULT_GPS_NAME_KM,
+    DEFAULT_LOCATION_GUESS_KM,
     DEFAULT_INHERIT_MINUTES,
     DEFAULT_LIBRARY,
     DEFAULT_LOCATION_DEGREES,
@@ -50,7 +50,7 @@ CONFIG_KEYS: dict[str, str] = {
     "thumb-size": "thumb_size",
     "speculative-id": "speculative_id",
     "inherit-minutes": "inherit_minutes",
-    "gps-name-km": "gps_name_km",
+    "location-guess-km": "location_guess_km",
     "keep-junk": "keep_junk",
     "narrative": "narrative",
     "owner-name": "owner_name",
@@ -68,7 +68,7 @@ DEFAULTS: dict = {
     "thumb-size": DEFAULT_THUMB_SIZE,
     "speculative-id": True,
     "inherit-minutes": DEFAULT_INHERIT_MINUTES,
-    "gps-name-km": DEFAULT_GPS_NAME_KM,
+    "location-guess-km": DEFAULT_LOCATION_GUESS_KM,
     "keep-junk": False,
     "narrative": True,
     "owner-name": [],
@@ -117,9 +117,9 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--inherit-minutes", type=int, default=argparse.SUPPRESS,
                         help="Give a location-less photo the nearest located "
                              "photo's place within this many minutes (0 disables)")
-    parser.add_argument("--gps-name-km", type=float, default=argparse.SUPPRESS,
-                        help="Name a GPS-only photo after the nearest located "
-                             "photo within this many km (0 disables)")
+    parser.add_argument("--location-guess-km", type=float, default=argparse.SUPPRESS,
+                        help="Guess the place of a GPS-only photo from the nearest "
+                             "located photo within this many km (0 disables)")
     parser.add_argument("--keep-junk", action=argparse.BooleanOptionalAction,
                         default=argparse.SUPPRESS,
                         help="Keep low-value shots (documents, barcodes, receipts, "
@@ -214,7 +214,7 @@ def main(argv: list[str] | None = None) -> int:
     photos = read_photos(inputs)
     windows = infer_owner_windows(photos) if owner else []
     selected = select_photos(photos, windows, owner, keep_noise,
-                             settings["inherit-minutes"], settings["gps-name-km"])
+                             settings["inherit-minutes"], settings["location-guess-km"])
     out = Path(settings["out"])
     html = out.suffix.lower() in (".html", ".htm")
     thumb_dir = out.parent / "photos" if settings["link"] == "thumb" else None
@@ -223,7 +223,7 @@ def main(argv: list[str] | None = None) -> int:
         photos, settings["gap-minutes"], settings["similarity"],
         settings["location-degrees"], settings["link"], Path(settings["library"]),
         html, thumb_dir, settings["thumb-size"], keep_noise, narrative,
-        owner_names, owner, settings["inherit-minutes"], settings["gps-name-km"],
+        owner_names, owner, settings["inherit-minutes"], settings["location-guess-km"],
     )
 
     out.parent.mkdir(parents=True, exist_ok=True)
