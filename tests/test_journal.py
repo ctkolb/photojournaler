@@ -8,6 +8,7 @@ import shutil
 from datetime import datetime, timezone, timedelta
 
 import pytest
+import yaml
 
 import build_journal
 from photosmeta import journal as j
@@ -202,6 +203,40 @@ def test_inherit_locations_owner_pool_ignores_other_cameras():
     assert target.inherited_location is None
     j.select_photos([other, target], windows, owner=False)
     assert target.inherited_location == "Dallas, TX"
+
+
+def test_name_from_gps_names_gps_only_photos():
+    windows = [("2024-01-01", "iPhone 13 Pro")]
+    labeled = photo("2024-01-01T10:00:00-06:00", "iPhone 13 Pro",
+                    latitude=32.78, longitude=-96.8,
+                    search_info={"city": "Dallas", "state_abbreviation": "TX"})
+    target = photo("2024-01-01T12:00:00-06:00", "iPhone 13 Pro",
+                   latitude=32.7801, longitude=-96.8001)  # ~15 m away, no place
+    j.select_photos([labeled, target], windows)
+    assert target.inherited_location == "Dallas, TX"
+    assert target.inherited_coord is None  # keeps its own coordinates
+
+
+def test_name_from_gps_respects_tolerance():
+    windows = [("2024-01-01", "iPhone 13 Pro")]
+    labeled = photo("2024-01-01T10:00:00-06:00", "iPhone 13 Pro",
+                    latitude=32.78, longitude=-96.8,
+                    search_info={"city": "Dallas", "state_abbreviation": "TX"})
+    far = photo("2024-01-01T10:05:00-06:00", "iPhone 13 Pro",
+                latitude=32.9, longitude=-96.8)  # ~13 km away
+    j.select_photos([labeled, far], windows, gps_name_km=0.1)
+    assert far.inherited_location is None
+
+
+def test_name_from_gps_zero_disables():
+    windows = [("2024-01-01", "iPhone 13 Pro")]
+    labeled = photo("2024-01-01T10:00:00-06:00", "iPhone 13 Pro",
+                    latitude=32.78, longitude=-96.8,
+                    search_info={"city": "Dallas", "state_abbreviation": "TX"})
+    target = photo("2024-01-01T10:05:00-06:00", "iPhone 13 Pro",
+                   latitude=32.7801, longitude=-96.8001)
+    j.select_photos([labeled, target], windows, gps_name_km=0)
+    assert target.inherited_location is None
 
 
 # --- location labels ------------------------------------------------------
@@ -697,3 +732,94 @@ def test_default_inputs_use_root_export(tmp_path):
     (tmp_path / "photos.sqlite").write_text("")
     assert build_journal.default_inputs(tmp_path) == [tmp_path / "photos.sqlite"]
     assert build_journal.default_inputs(tmp_path / "empty") == []
+
+
+# --- config ---------------------------------------------------------------
+
+def test_generate_config_writes_defaults(tmp_path):
+    path = tmp_path / "config.yaml"
+    assert build_journal.main(["--generate-config", str(path)]) == 0
+    data = yaml.safe_load(path.read_text())
+    assert data["gap-minutes"] == 75
+    assert data["gps-name-km"] == 0.1
+    assert data["no-speculative-id"] is False
+    assert data["keep-junk"] is False
+
+
+def test_generate_config_applies_flags(tmp_path):
+    path = tmp_path / "c.yaml"
+    build_journal.main(["--generate-config", str(path),
+                        "--gap-minutes", "30", "--no-speculative-id"])
+    data = yaml.safe_load(path.read_text())
+    assert data["gap-minutes"] == 30
+    assert data["no-speculative-id"] is True
+
+
+def test_generate_config_defaults_to_cwd(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    build_journal.main(["--generate-config", "--quiet"])
+    assert (tmp_path / "config.yaml").exists()
+
+
+def test_generate_config_does_not_run(tmp_path, capsys):
+    # No inputs exist, but generating must still succeed and not build a journal.
+    code = build_journal.main(["--generate-config", str(tmp_path / "c.yaml")])
+    assert code == 0
+    assert "Wrote" in capsys.readouterr().out
+
+
+def test_config_sets_settings(tmp_path):
+    records = [build_record(make_photo(ai_caption="a cat"))]
+    sqlite_path = tmp_path / "photos.sqlite"
+    _write_sqlite(records, sqlite_path)
+    cfg = tmp_path / "c.yaml"
+    cfg.write_text(yaml.safe_dump({"no-speculative-id": True, "out": str(tmp_path / "j.md")}))
+    assert build_journal.main([str(sqlite_path), "--config", str(cfg),
+                               "--link", "none", "--quiet"]) == 0
+    assert "Owner-phone detection is off" in (tmp_path / "j.md").read_text()
+
+
+def test_flags_override_config(tmp_path):
+    records = [build_record(make_photo(ai_caption="a cat"))]
+    sqlite_path = tmp_path / "photos.sqlite"
+    _write_sqlite(records, sqlite_path)
+    cfg = tmp_path / "c.yaml"
+    cfg.write_text(yaml.safe_dump({"no-speculative-id": False}))
+    out = tmp_path / "j.md"
+    build_journal.main([str(sqlite_path), "--config", str(cfg),
+                        "--no-speculative-id", "--out", str(out),
+                        "--link", "none", "--quiet"])
+    assert "Owner-phone detection is off" in out.read_text()
+
+
+def test_default_config_used_when_present(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    records = [build_record(make_photo(ai_caption="a cat"))]
+    sqlite_path = tmp_path / "photos.sqlite"
+    _write_sqlite(records, sqlite_path)
+    (tmp_path / "config.yaml").write_text(yaml.safe_dump({"no-speculative-id": True}))
+    out = tmp_path / "j.md"
+    build_journal.main([str(sqlite_path), "--out", str(out),
+                        "--link", "none", "--quiet"])
+    assert "Owner-phone detection is off" in out.read_text()
+
+
+def test_config_missing_settings_use_defaults(tmp_path, capsys):
+    path = tmp_path / "c.yaml"
+    path.write_text(yaml.safe_dump({"gap-minutes": 12}))
+    cfg = build_journal.load_config(path)
+    assert cfg == {"gap-minutes": 12}
+    assert "unknown" not in capsys.readouterr().err
+
+
+def test_config_unknown_keys_warn(tmp_path, capsys):
+    path = tmp_path / "c.yaml"
+    path.write_text(yaml.safe_dump({"gap-minutes": 12, "nonsense": 1}))
+    cfg = build_journal.load_config(path)
+    assert cfg == {"gap-minutes": 12}
+    assert "nonsense" in capsys.readouterr().err
+
+
+def test_config_flag_overrides_only_specified(tmp_path):
+    args = build_journal.parse_args(["--gap-minutes", "30"])
+    assert build_journal.flag_overrides(args) == {"gap-minutes": 30}
