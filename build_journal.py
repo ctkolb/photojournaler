@@ -5,10 +5,11 @@ Reads one or more ``photos.sqlite`` (or ``photos.json``) exports produced by
 ``export_photos_metadata.py`` and writes a single, chronological journal
 containing only the library owner's camera photos.
 
-Every option can also be set in a YAML config file. Flags override the config,
-and the config overrides the built-in defaults. With no ``--config``, a
-``config.yaml`` in the working directory is used when present. ``--generate-config``
-writes a config (from the defaults, with any given flags applied) and exits.
+Every option can also be set in a YAML config file, keyed by the flag name.
+Flags override the config, and the config overrides the built-in defaults. With
+no ``--config``, a ``config.yaml`` in the working directory is used when present.
+``--generate-config`` writes a config (from the defaults, with any given flags
+applied) and exits.
 """
 
 from __future__ import annotations
@@ -37,26 +38,25 @@ from photosmeta.journal import (
 
 DEFAULT_CONFIG = Path("config.yaml")
 
-# config/flag name -> (argparse dest, kind). kind is "value", "store_true",
-# or "store_false". The YAML key is the same as the flag (without "--").
-SETTINGS: dict[str, tuple[str, str]] = {
-    "out": ("out", "value"),
-    "gap-minutes": ("gap_minutes", "value"),
-    "similarity": ("similarity", "value"),
-    "location-degrees": ("location_degrees", "value"),
-    "link": ("link", "value"),
-    "library": ("library", "value"),
-    "thumb-size": ("thumb_size", "value"),
-    "no-speculative-id": ("speculative_id", "store_false"),
-    "inherit-minutes": ("inherit_minutes", "value"),
-    "gps-name-km": ("gps_name_km", "value"),
-    "keep-junk": ("keep_junk", "store_true"),
-    "no-narrative": ("narrative", "store_false"),
-    "owner-name": ("owner_name", "value"),
-    "quiet": ("quiet", "store_true"),
+# config key (= flag name) -> argparse dest
+CONFIG_KEYS: dict[str, str] = {
+    "inputs": "inputs",
+    "out": "out",
+    "gap-minutes": "gap_minutes",
+    "similarity": "similarity",
+    "location-degrees": "location_degrees",
+    "link": "link",
+    "library": "library",
+    "thumb-size": "thumb_size",
+    "speculative-id": "speculative_id",
+    "inherit-minutes": "inherit_minutes",
+    "gps-name-km": "gps_name_km",
+    "keep-junk": "keep_junk",
+    "narrative": "narrative",
+    "owner-name": "owner_name",
+    "quiet": "quiet",
 }
 
-# Default settings, in the same "flag" space (booleans mean "flag is set").
 DEFAULTS: dict = {
     "inputs": [],
     "out": "out/journal.md",
@@ -66,11 +66,11 @@ DEFAULTS: dict = {
     "link": "thumb",
     "library": str(DEFAULT_LIBRARY),
     "thumb-size": DEFAULT_THUMB_SIZE,
-    "no-speculative-id": False,
+    "speculative-id": True,
     "inherit-minutes": DEFAULT_INHERIT_MINUTES,
     "gps-name-km": DEFAULT_GPS_NAME_KM,
     "keep-junk": False,
-    "no-narrative": False,
+    "narrative": True,
     "owner-name": [],
     "quiet": False,
 }
@@ -110,35 +110,37 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
                         help="Photos library path, used to resolve photo links")
     parser.add_argument("--thumb-size", type=int, default=argparse.SUPPRESS,
                         help="Max pixels (long edge) for --link thumb")
-    parser.add_argument("--no-speculative-id", action="store_false",
-                        dest="speculative_id", default=argparse.SUPPRESS,
-                        help="Do not infer the owner's phone; include every camera")
+    parser.add_argument("--speculative-id", action=argparse.BooleanOptionalAction,
+                        default=argparse.SUPPRESS,
+                        help="Infer the owner's phone and keep only its camera "
+                             "photos (use --no-speculative-id for every camera)")
     parser.add_argument("--inherit-minutes", type=int, default=argparse.SUPPRESS,
                         help="Give a location-less photo the nearest located "
                              "photo's place within this many minutes (0 disables)")
     parser.add_argument("--gps-name-km", type=float, default=argparse.SUPPRESS,
                         help="Name a GPS-only photo after the nearest located "
                              "photo within this many km (0 disables)")
-    parser.add_argument("--keep-junk", action="store_true", default=argparse.SUPPRESS,
-                        help="Keep low-value shots (documents, barcodes, receipts, "
-                             "menus, boxes); they are dropped by default")
-    parser.add_argument("--no-narrative", action="store_false", dest="narrative",
+    parser.add_argument("--keep-junk", action=argparse.BooleanOptionalAction,
                         default=argparse.SUPPRESS,
-                        help="Omit the per-day summary paragraph")
+                        help="Keep low-value shots (documents, barcodes, receipts, "
+                             "menus, boxes); dropped by default")
+    parser.add_argument("--narrative", action=argparse.BooleanOptionalAction,
+                        default=argparse.SUPPRESS,
+                        help="Write the per-day story (use --no-narrative to omit)")
     parser.add_argument("--owner-name", action="append", default=argparse.SUPPRESS,
                         help="Person name to omit from 'with ...' (repeatable)")
-    parser.add_argument("--quiet", action="store_true", default=argparse.SUPPRESS,
+    parser.add_argument("--quiet", action=argparse.BooleanOptionalAction,
+                        default=argparse.SUPPRESS,
                         help="Suppress summary output")
     return parser.parse_args(argv)
 
 
 def flag_overrides(args: argparse.Namespace) -> dict:
-    """The settings explicitly set on the command line, in flag space."""
+    """The settings explicitly set on the command line."""
     overrides: dict = {}
-    for flag, (dest, kind) in SETTINGS.items():
-        if not hasattr(args, dest):
-            continue
-        overrides[flag] = getattr(args, dest) if kind == "value" else True
+    for key, dest in CONFIG_KEYS.items():
+        if dest != "inputs" and hasattr(args, dest):
+            overrides[key] = getattr(args, dest)
     if getattr(args, "inputs", None):
         overrides["inputs"] = [str(path) for path in args.inputs]
     return overrides
@@ -204,9 +206,9 @@ def main(argv: list[str] | None = None) -> int:
             print(f"Input not found: {path}", file=sys.stderr)
         return 1
 
-    owner = not settings["no-speculative-id"]
+    owner = settings["speculative-id"]
     keep_noise = settings["keep-junk"]
-    narrative = not settings["no-narrative"]
+    narrative = settings["narrative"]
     quiet = settings["quiet"]
 
     photos = read_photos(inputs)

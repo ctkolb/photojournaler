@@ -742,7 +742,7 @@ def test_generate_config_writes_defaults(tmp_path):
     data = yaml.safe_load(path.read_text())
     assert data["gap-minutes"] == 75
     assert data["gps-name-km"] == 0.1
-    assert data["no-speculative-id"] is False
+    assert data["speculative-id"] is True
     assert data["keep-junk"] is False
 
 
@@ -752,7 +752,7 @@ def test_generate_config_applies_flags(tmp_path):
                         "--gap-minutes", "30", "--no-speculative-id"])
     data = yaml.safe_load(path.read_text())
     assert data["gap-minutes"] == 30
-    assert data["no-speculative-id"] is True
+    assert data["speculative-id"] is False
 
 
 def test_generate_config_defaults_to_cwd(tmp_path, monkeypatch):
@@ -773,7 +773,7 @@ def test_config_sets_settings(tmp_path):
     sqlite_path = tmp_path / "photos.sqlite"
     _write_sqlite(records, sqlite_path)
     cfg = tmp_path / "c.yaml"
-    cfg.write_text(yaml.safe_dump({"no-speculative-id": True, "out": str(tmp_path / "j.md")}))
+    cfg.write_text(yaml.safe_dump({"speculative-id": False, "out": str(tmp_path / "j.md")}))
     assert build_journal.main([str(sqlite_path), "--config", str(cfg),
                                "--link", "none", "--quiet"]) == 0
     assert "Owner-phone detection is off" in (tmp_path / "j.md").read_text()
@@ -784,7 +784,7 @@ def test_flags_override_config(tmp_path):
     sqlite_path = tmp_path / "photos.sqlite"
     _write_sqlite(records, sqlite_path)
     cfg = tmp_path / "c.yaml"
-    cfg.write_text(yaml.safe_dump({"no-speculative-id": False}))
+    cfg.write_text(yaml.safe_dump({"speculative-id": True}))
     out = tmp_path / "j.md"
     build_journal.main([str(sqlite_path), "--config", str(cfg),
                         "--no-speculative-id", "--out", str(out),
@@ -797,7 +797,7 @@ def test_default_config_used_when_present(tmp_path, monkeypatch):
     records = [build_record(make_photo(ai_caption="a cat"))]
     sqlite_path = tmp_path / "photos.sqlite"
     _write_sqlite(records, sqlite_path)
-    (tmp_path / "config.yaml").write_text(yaml.safe_dump({"no-speculative-id": True}))
+    (tmp_path / "config.yaml").write_text(yaml.safe_dump({"speculative-id": False}))
     out = tmp_path / "j.md"
     build_journal.main([str(sqlite_path), "--out", str(out),
                         "--link", "none", "--quiet"])

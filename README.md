@@ -150,11 +150,11 @@ config, and the config overrides the defaults.
 | `--link MODE` | Link each count: `thumb`, `preview`, `original`, `photos`, `none` (default: `thumb`) |
 | `--library PATH` | Photos library used to resolve links (default: `~/Pictures/Photos Library.photoslibrary`) |
 | `--thumb-size N` | Long-edge pixels for `--link thumb` (default: 400) |
-| `--no-speculative-id` | Include every camera, not just the inferred owner's phone |
+| `--speculative-id` / `--no-speculative-id` | Infer the owner's phone and keep only its photos (default), or `--no-…` to include every camera |
 | `--inherit-minutes N` | Give a location-less photo the nearest located photo's place within N minutes (default: 5; `0` disables) |
 | `--gps-name-km F` | Name a GPS-only photo after the nearest located photo within F km (default: 0.1; `0` disables) |
-| `--keep-junk` | Keep low-value shots (documents, barcodes, receipts, menus, boxes) |
-| `--no-narrative` | Omit the per-day story |
+| `--keep-junk` / `--no-keep-junk` | Keep low-value shots (documents, barcodes, receipts, menus, boxes); dropped by default |
+| `--narrative` / `--no-narrative` | Write the per-day story (default), or `--no-…` to omit |
 | `--owner-name NAME` | Person to omit from `with …` (the journal owner; repeatable) |
 | `--quiet` | Suppress the summary |
 
@@ -164,7 +164,7 @@ Any option can live in a YAML file, keyed by the flag name:
 
 ```yaml
 gap-minutes: 75
-no-speculative-id: false
+speculative-id: true
 gps-name-km: 0.1
 owner-name: ["Your Name"]
 ```
