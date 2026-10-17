@@ -20,6 +20,7 @@ from pathlib import Path
 
 from photosmeta.journal import (
     DEFAULT_GAP_MINUTES,
+    DEFAULT_INHERIT_MINUTES,
     DEFAULT_LIBRARY,
     DEFAULT_LOCATION_DEGREES,
     DEFAULT_SIMILARITY,
@@ -29,7 +30,7 @@ from photosmeta.journal import (
     format_owner_phones,
     infer_owner_windows,
     read_photos,
-    select_owner_photos,
+    select_photos,
 )
 
 
@@ -74,6 +75,13 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
                              "receipts, menus, boxes); they are dropped by default")
     parser.add_argument("--no-narrative", action="store_false", dest="narrative",
                         help="Omit the per-day summary paragraph")
+    parser.add_argument("--no-owner", action="store_false", dest="owner",
+                        help="Include every camera (not just the owner's phone)")
+    parser.add_argument("--inherit-minutes", type=int,
+                        default=DEFAULT_INHERIT_MINUTES,
+                        help="Give a photo with no location the nearest located "
+                             "photo's location within this many minutes "
+                             f"(default: {DEFAULT_INHERIT_MINUTES}; 0 disables)")
     parser.add_argument("--owner-name", action="append", default=None,
                         help="Person name to omit from 'with ...' (the journal "
                              "owner; repeatable)")
@@ -95,15 +103,16 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     photos = read_photos(inputs)
-    windows = infer_owner_windows(photos)
-    owner = select_owner_photos(photos, windows, args.keep_junk)
+    windows = infer_owner_windows(photos) if args.owner else []
+    selected = select_photos(photos, windows, args.owner, args.keep_junk,
+                             args.inherit_minutes)
     html = args.out.suffix.lower() in (".html", ".htm")
     thumb_dir = args.out.parent / "photos" if args.link == "thumb" else None
     owner_names = set(args.owner_name) if args.owner_name else None
     document = build_journal(
         photos, args.gap_minutes, args.similarity, args.location_degrees,
         args.link, args.library, html, thumb_dir, args.thumb_size, args.keep_junk,
-        args.narrative, owner_names,
+        args.narrative, owner_names, args.owner, args.inherit_minutes,
     )
 
     args.out.parent.mkdir(parents=True, exist_ok=True)
@@ -111,8 +120,11 @@ def main(argv: list[str] | None = None) -> int:
 
     if not args.quiet:
         print(f"Read {len(photos):,} assets from {len(inputs)} export(s)")
-        print(f"Owner's phone: {format_owner_phones(windows)}")
-        print(f"Selected {len(owner):,} owner photos -> {args.out}")
+        if args.owner:
+            print(f"Owner's phone: {format_owner_phones(windows)}")
+        else:
+            print("Owner-phone detection: off (all cameras)")
+        print(f"Selected {len(selected):,} photos -> {args.out}")
     return 0
 
 

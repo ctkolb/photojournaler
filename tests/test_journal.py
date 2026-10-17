@@ -124,7 +124,7 @@ def test_select_owner_photos_filters_dedups_and_sorts():
         photo("2024-01-02T10:00:00-06:00", "Canon EOS 7D", ai_caption="dslr"),
         photo("2024-01-02T10:00:00-06:00", "iPhone 13 Pro", screenshot=True),
     ]
-    selected = j.select_owner_photos(photos, windows)
+    selected = j.select_photos(photos, windows)
     assert [p.ai_caption for p in selected] == ["a", "b"]
 
 
@@ -153,9 +153,55 @@ def test_select_owner_photos_drops_noise_by_default():
     clean = photo("2024-01-01T10:00:00-06:00", "iPhone 13 Pro", ai_caption="a cat on a couch")
     junk = photo("2024-01-01T11:00:00-06:00", "iPhone 13 Pro",
                  ai_caption="a close up of a barcode")
-    assert [p.ai_caption for p in j.select_owner_photos([clean, junk], windows)] == \
+    assert [p.ai_caption for p in j.select_photos([clean, junk], windows)] == \
         ["a cat on a couch"]
-    assert len(j.select_owner_photos([clean, junk], windows, keep_noise=True)) == 2
+    assert len(j.select_photos([clean, junk], windows, keep_noise=True)) == 2
+
+
+def test_select_photos_owner_off_keeps_all_cameras():
+    windows = [("2024-01-01", "iPhone 13 Pro")]
+    photos = [
+        photo("2024-01-01T10:00:00-06:00", "iPhone 13 Pro", ai_caption="a"),
+        photo("2024-01-01T11:00:00-06:00", "Canon EOS 7D", ai_caption="b"),
+        photo("2024-01-01T12:00:00-06:00", "iPhone 15 Pro", ai_caption="c"),
+    ]
+    on = {p.camera_model for p in j.select_photos(photos, windows, owner=True)}
+    off = {p.camera_model for p in j.select_photos(photos, windows, owner=False)}
+    assert on == {"iPhone 13 Pro"}
+    assert off == {"iPhone 13 Pro", "Canon EOS 7D", "iPhone 15 Pro"}
+
+
+def test_inherit_locations_within_window():
+    windows = [("2024-01-01", "iPhone 13 Pro")]
+    located = photo("2024-01-01T10:00:00-06:00", "iPhone 13 Pro",
+                    latitude=32.78, longitude=-96.8,
+                    search_info={"city": "Dallas", "state_abbreviation": "TX"})
+    target = photo("2024-01-01T10:03:00-06:00", "iPhone 13 Pro")
+    selected = j.select_photos([located, target], windows)
+    assert target.inherited_location == "Dallas, TX"
+    assert target.inherited_coord == (32.78, -96.8)
+    assert target in selected
+
+
+def test_inherit_minutes_zero_disables():
+    windows = [("2024-01-01", "iPhone 13 Pro")]
+    located = photo("2024-01-01T10:00:00-06:00", "iPhone 13 Pro",
+                    search_info={"city": "Dallas", "state_abbreviation": "TX"})
+    target = photo("2024-01-01T10:03:00-06:00", "iPhone 13 Pro")
+    j.select_photos([located, target], windows, inherit_minutes=0)
+    assert target.inherited_location is None
+
+
+def test_inherit_locations_owner_pool_ignores_other_cameras():
+    windows = [("2024-01-01", "iPhone 13 Pro")]
+    other = photo("2024-01-01T10:00:00-06:00", "Canon EOS 7D", latitude=32.78,
+                  longitude=-96.8,
+                  search_info={"city": "Dallas", "state_abbreviation": "TX"})
+    target = photo("2024-01-01T10:03:00-06:00", "iPhone 13 Pro")
+    j.select_photos([other, target], windows, owner=True)
+    assert target.inherited_location is None
+    j.select_photos([other, target], windows, owner=False)
+    assert target.inherited_location == "Dallas, TX"
 
 
 # --- location labels ------------------------------------------------------
@@ -350,7 +396,7 @@ def test_render_structure_and_grammar():
               media_type="video"),
     ]
     windows = j.infer_owner_windows(photos)
-    doc = j.render(j.build_batches(j.select_owner_photos(photos, windows)), windows)
+    doc = j.render(j.build_batches(j.select_photos(photos, windows)), windows)
     assert doc.startswith("# Photo Journal")
     assert "## 2024" in doc
     assert "### January 2024" in doc
@@ -437,7 +483,7 @@ def test_materialize_thumbs_generates_files(tmp_path):
     photos = [photo("2024-01-01T10:00:00-06:00", ai_caption="a cat", uuid=UUID,
                     filename=f"{UUID}.png", search_info={"city": "Fairview"})]
     windows = j.infer_owner_windows(photos)
-    batches = j.build_batches(j.select_owner_photos(photos, windows))
+    batches = j.build_batches(j.select_photos(photos, windows))
     doc = j.render(batches, windows, link="thumb", library=library, thumb_dir=thumb_dir)
     assert (thumb_dir / f"{UUID}.jpg").exists()
     assert f"[1 photo](photos/{UUID}.jpg)" in doc
@@ -447,7 +493,7 @@ def test_render_links_the_photo_count(tmp_path):
     photos = [photo("2024-01-01T10:00:00-06:00", ai_caption="a cat",
                     uuid=UUID, filename="x.heic", search_info={"city": "Fairview"})]
     windows = j.infer_owner_windows(photos)
-    batches = j.build_batches(j.select_owner_photos(photos, windows))
+    batches = j.build_batches(j.select_photos(photos, windows))
     doc = j.render(batches, windows, link="photos", library=tmp_path)
     assert f"[1 photo](photos://asset?identifier={UUID})" in doc
     # The link must not be nested inside emphasis/parentheses.
@@ -461,7 +507,7 @@ def test_render_html_links_escapes_and_structure(tmp_path):
     photos = [photo("2024-01-01T10:00:00-06:00", ai_caption="a cat & a dog <3",
                     uuid=UUID, filename="x.heic", search_info={"city": "Fairview"})]
     windows = j.infer_owner_windows(photos)
-    batches = j.build_batches(j.select_owner_photos(photos, windows))
+    batches = j.build_batches(j.select_photos(photos, windows))
     doc = j.render_html(batches, windows, link="photos", library=tmp_path)
     assert doc.startswith("<!DOCTYPE html>")
     assert doc.rstrip().endswith("</html>")
@@ -474,7 +520,7 @@ def test_render_html_unlinked_uses_emphasis(tmp_path):
     photos = [photo("2024-01-01T10:00:00-06:00", ai_caption="a cat",
                     search_info={"city": "Fairview"})]
     windows = j.infer_owner_windows(photos)
-    batches = j.build_batches(j.select_owner_photos(photos, windows))
+    batches = j.build_batches(j.select_photos(photos, windows))
     doc = j.render_html(batches, windows, link="none")
     assert "<em>(1 photo)</em>" in doc
     assert "<a href=" not in doc
@@ -483,7 +529,7 @@ def test_render_html_unlinked_uses_emphasis(tmp_path):
 # --- narrative ------------------------------------------------------------
 
 def _day_narrative_for(photos):
-    batches = j.build_batches(j.select_owner_photos(photos))
+    batches = j.build_batches(j.select_photos(photos))
     items = [(batch, j.cluster_entries(batch.entries)) for batch in batches]
     text, _ = j.day_narrative(batches[0].start.date(), items)
     return text
@@ -557,7 +603,7 @@ def test_day_narrative_scales_with_more_lines():
 def test_render_can_omit_narrative():
     photos = [photo("2024-01-01T09:00:00-06:00", ai_caption="a cat",
                     search_info={"home": "Home"})]
-    batches = j.build_batches(j.select_owner_photos(photos))
+    batches = j.build_batches(j.select_photos(photos))
     assert "On Monday, January 1" in j.render(batches, narrative=True)
     assert "On Monday, January 1" not in j.render(batches, narrative=False)
 
@@ -565,7 +611,7 @@ def test_render_can_omit_narrative():
 def test_render_html_includes_narrative():
     photos = [photo("2024-01-01T09:00:00-06:00", ai_caption="a cat",
                     search_info={"home": "Home"})]
-    batches = j.build_batches(j.select_owner_photos(photos))
+    batches = j.build_batches(j.select_photos(photos))
     assert '<p class="narrative">' in j.render_html(batches, narrative=True)
     assert '<p class="narrative">' not in j.render_html(batches, narrative=False)
 
@@ -581,7 +627,7 @@ def test_build_journal_selects_only_owner_photos():
         photo("2024-01-03T10:00:00-06:00", "Canon EOS 7D", ai_caption="dslr"),
     ]
     doc = j.build_journal(photos)
-    assert "**2 owner photos" in doc
+    assert "**2 photos" in doc
     assert "family" not in doc and "dslr" not in doc
 
 

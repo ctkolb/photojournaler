@@ -12,7 +12,7 @@ from .journal import (
     read_photos,
     render,
     render_html,
-    select_owner_photos,
+    select_photos,
 )
 from .schema import SCALAR_COLUMNS, flatten, relations
 from .writers import CsvWriter, JsonWriter, SqliteWriter
@@ -29,7 +29,7 @@ __all__ = [
     "Batch",
     "read_photos",
     "infer_owner_windows",
-    "select_owner_photos",
+    "select_photos",
     "build_batches",
     "render",
     "render_html",

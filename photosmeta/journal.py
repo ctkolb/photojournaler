@@ -5,15 +5,17 @@ The pipeline is deterministic and split into small, testable steps:
 1. :func:`infer_owner_windows` speculates which phone belongs to the library
    owner by taking the most common iPhone per month and requiring the owner's
    model to only ever get newer (higher generation, then higher tier).
-2. :func:`select_owner_photos` keeps only camera photos from the owner's phone
-   (dropping screenshots, screen recordings, saved/shared images, other
-   people's phones, and DSLRs) and removes duplicate album exports.
+2. :func:`select_photos` keeps camera photos (by default only the owner's
+   phone), drops screenshots, saved/shared images, and low-value shots, fills a
+   missing location from the nearest located photo within a few minutes, and
+   removes duplicate album exports.
 3. :func:`build_batches` groups nearby photos at the same place.
 4. :func:`render` writes the journal.
 """
 
 from __future__ import annotations
 
+import bisect
 import html
 import json
 import re
@@ -35,6 +37,7 @@ DEFAULT_SIMILARITY = 0.5
 DEFAULT_LOCATION_DEGREES = 0.005  # ~0.5 km; start a new place once you move this far
 DEFAULT_LIBRARY = Path.home() / "Pictures" / "Photos Library.photoslibrary"
 DEFAULT_THUMB_SIZE = 400
+DEFAULT_INHERIT_MINUTES = 5
 LINK_MODES = ("thumb", "preview", "original", "photos", "none")
 
 _TIERS = (("Pro Max", 3), ("Pro", 2), ("Plus", 1))
@@ -60,6 +63,8 @@ class Photo:
     uuid: str | None = None
     filename: str | None = None
     search_info: dict = field(default_factory=dict)
+    inherited_location: str | None = None
+    inherited_coord: tuple[float, float] | None = None
 
     @property
     def dt(self) -> datetime | None:
@@ -67,6 +72,8 @@ class Photo:
 
     @property
     def coord(self) -> tuple[float, float] | None:
+        if self.inherited_coord is not None:
+            return self.inherited_coord
         if self.latitude is None or self.longitude is None:
             return None
         return (self.latitude, self.longitude)
@@ -234,25 +241,69 @@ def is_camera_photo(photo: Photo) -> bool:
     return True
 
 
-def select_owner_photos(
+def _inherit_locations(photos: list[Photo], minutes: int) -> None:
+    """Fill a missing location from the nearest-in-time located photo."""
+    if minutes <= 0:
+        return
+    pool = sorted(
+        (p for p in photos if p.dt is not None and location_label(p) != UNKNOWN),
+        key=lambda p: p.dt,
+    )
+    if not pool:
+        return
+    times = [p.dt for p in pool]
+    for photo in photos:
+        if photo.dt is None or photo.coord is not None or location_label(photo) != UNKNOWN:
+            continue
+        i = bisect.bisect_left(times, photo.dt)
+        best: tuple[float, Photo] | None = None
+        for j in (i - 1, i):
+            if 0 <= j < len(pool):
+                delta = abs((pool[j].dt - photo.dt).total_seconds())
+                if delta <= minutes * 60 and (best is None or delta < best[0]):
+                    best = (delta, pool[j])
+        if best is not None:
+            photo.inherited_location = location_label(best[1])
+            photo.inherited_coord = best[1].coord
+
+
+def select_photos(
     photos: Iterable[Photo],
     windows: list[tuple[str, str]] | None = None,
+    owner: bool = True,
     keep_noise: bool = False,
+    inherit_minutes: int = 5,
 ) -> list[Photo]:
+    """Pick the photos to journalize.
+
+    With ``owner`` (the default) only the inferred owner-phone camera photos are
+    kept; otherwise every camera photo is kept. Photos with no location adopt the
+    location of the nearest-in-time located photo within ``inherit_minutes`` —
+    from the owner's phone only when ``owner`` is set, from any camera otherwise.
+    """
     photos = list(photos)
-    if windows is None:
-        windows = infer_owner_windows(photos)
-    selected = [
-        photo
-        for photo in photos
-        if model_rank(photo.camera_model) is not None
-        and photo.camera_model == owner_model(photo.date_original, windows)
-        and is_camera_photo(photo)
-        and (keep_noise or not is_noise(photo))
-    ]
+    if owner:
+        if windows is None:
+            windows = infer_owner_windows(photos)
+        eligible = [
+            photo
+            for photo in photos
+            if model_rank(photo.camera_model) is not None
+            and photo.camera_model == owner_model(photo.date_original, windows)
+            and is_camera_photo(photo)
+            and (keep_noise or not is_noise(photo))
+        ]
+    else:
+        eligible = [
+            photo
+            for photo in photos
+            if is_camera_photo(photo) and (keep_noise or not is_noise(photo))
+        ]
+    _inherit_locations(eligible, inherit_minutes)
+
     seen: set[tuple[str, str | None]] = set()
     deduped: list[Photo] = []
-    for photo in sorted(selected, key=lambda p: p.date_original):
+    for photo in sorted(eligible, key=lambda p: p.date_original):
         key = (photo.date_original, photo.camera_model)
         if key in seen:
             continue
@@ -284,6 +335,8 @@ def location_label(photo: Photo) -> str:
     """
     address = photo.place_address or ""
     place = photo.place_name or ""
+    if photo.inherited_location:
+        return photo.inherited_location
     if address.startswith(HOME_ADDR) or photo.search_info.get("home") == "Home":
         return HOME_LABEL
     if "Riverside" in place or "Fairview" in place:
@@ -872,20 +925,26 @@ def render(batches: list[Batch], windows: list[tuple[str, str]] | None = None,
     ]
     if batches:
         lines += [
-            f"**{total:,} owner photos · {batches[0].start:%b %-d, %Y} – "
+            f"**{total:,} photos · {batches[0].start:%b %-d, %Y} – "
             f"{batches[-1].end:%b %-d, %Y}**",
             "",
         ]
+    scope = ("The owner's camera photos only, in capture order." if windows
+             else "Camera photos from every device, in capture order.")
+    owner_line = (
+        "Owner's phone (inferred from the dominant-iPhone progression): "
+        f"{format_owner_phones(windows)}." if windows
+        else "Owner-phone detection is off."
+    )
     lines += [
-        "The owner's camera photos only, in capture order.",
+        scope,
         "",
-        f"Owner's phone (inferred from the dominant-iPhone progression): "
-        f"{format_owner_phones(windows or [])}.",
+        owner_line,
         "",
-        "Screenshots, screen recordings, saved/shared images, other people's "
-        "phones, and DSLRs are excluded. Locations are colloquial names from "
-        "reverse-geocoded place data; descriptions come from Apple's on-device "
-        "ML captions, labels, and OCR. **★** marks a favorite.",
+        "Screenshots, screen recordings, saved/shared images, and low-value "
+        "shots are excluded. Locations are colloquial names from reverse-geocoded "
+        "place data; descriptions come from Apple's on-device ML captions, labels, "
+        "and OCR. **★** marks a favorite.",
         "",
     ]
 
@@ -981,16 +1040,21 @@ def render_html(
     ]
     if batches:
         out.append(
-            f'<p class="meta">{total:,} owner photos · '
+            f'<p class="meta">{total:,} photos · '
             f"{batches[0].start:%b %-d, %Y} – {batches[-1].end:%b %-d, %Y}</p>"
         )
+    scope = ("The owner's camera photos only, in capture order." if windows
+             else "Camera photos from every device, in capture order.")
+    owner_line = (
+        f"Owner's phone: {html.escape(format_owner_phones(windows))}." if windows
+        else "Owner-phone detection is off."
+    )
     out.append(
-        '<p class="note">The owner\'s camera photos only, in capture order. '
-        f"Owner's phone: {html.escape(format_owner_phones(windows or []))}. "
-        "Screenshots, screen recordings, saved/shared images, other people's "
-        "phones, and DSLRs are excluded. Locations are colloquial names from "
-        "reverse-geocoded place data; descriptions come from Apple's on-device "
-        "ML captions, labels, and OCR. &#9733; marks a favorite.</p>"
+        f'<p class="note">{html.escape(scope)} {owner_line} '
+        "Screenshots, screen recordings, saved/shared images, and low-value "
+        "shots are excluded. Locations are colloquial names from reverse-geocoded "
+        "place data; descriptions come from Apple's on-device ML captions, labels, "
+        "and OCR. &#9733; marks a favorite.</p>"
     )
 
     day_cameras: dict = {}
@@ -1075,11 +1139,13 @@ def build_journal(
     keep_noise: bool = False,
     narrative: bool = True,
     owner_name: set[str] | None = None,
+    owner: bool = True,
+    inherit_minutes: int = DEFAULT_INHERIT_MINUTES,
 ) -> str:
-    """Select the owner's photos and render the full journal."""
+    """Select the photos and render the full journal."""
     photos = list(photos)
-    windows = infer_owner_windows(photos)
-    selected = select_owner_photos(photos, windows, keep_noise)
+    windows = infer_owner_windows(photos) if owner else []
+    selected = select_photos(photos, windows, owner, keep_noise, inherit_minutes)
     batches = build_batches(selected, gap_minutes, location_degrees, owner_name)
     renderer = render_html if html else render
     return renderer(batches, windows, similarity, link, library, thumb_dir,
