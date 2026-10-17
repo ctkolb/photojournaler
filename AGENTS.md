@@ -135,3 +135,6 @@ pipeline.
 - American English everywhere (behavior, color, center, license, …).
 - Never work on `main`; create a branch before committing.
 - Never run `git push` or any remote/PR operation — stop at the local commit.
+- **Commit often**, in small, focused steps as work progresses — one logical
+  change per commit (a bug fix, a new option, a docs update), not one big commit
+  at the end. Each message should say what changed.
