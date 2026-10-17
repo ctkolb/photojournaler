@@ -10,7 +10,7 @@ Goal: no commit can land on `main` unless the CI status check **`test`**
    checks list.
 
 The commands below only touch repository settings — run them yourself after CI
-has run once. `owner/repo` is `ctkolb/PhotosMetadata`.
+has run once. `owner/repo` is `ctkolb/photojournaler`.
 
 ## Option A — repository ruleset (recommended)
 
@@ -18,7 +18,7 @@ Rulesets work on private repositories; classic branch protection requires a
 paid plan on private repos.
 
 ```sh
-gh api --method POST repos/ctkolb/PhotosMetadata/rulesets --input - <<'JSON'
+gh api --method POST repos/ctkolb/photojournaler/rulesets --input - <<'JSON'
 {
   "name": "Protect main",
   "target": "branch",
@@ -60,7 +60,7 @@ JSON
 ## Option B — classic branch protection (fallback)
 
 ```sh
-gh api --method PUT repos/ctkolb/PhotosMetadata/branches/main/protection --input - <<'JSON'
+gh api --method PUT repos/ctkolb/photojournaler/branches/main/protection --input - <<'JSON'
 {
   "required_status_checks": { "strict": true, "contexts": ["test"] },
   "enforce_admins": true,
@@ -79,10 +79,10 @@ maintainer needs a second approver. Use Option A if that's a problem.
 
 ```sh
 # ruleset
-gh api repos/ctkolb/PhotosMetadata/rulesets
+gh api repos/ctkolb/photojournaler/rulesets
 
 # classic protection
-gh api repos/ctkolb/PhotosMetadata/branches/main/protection
+gh api repos/ctkolb/photojournaler/branches/main/protection
 ```
 
 You can also see it in the UI under **Settings → Rules → Rulesets** (or

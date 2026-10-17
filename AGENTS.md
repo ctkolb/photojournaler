@@ -4,7 +4,7 @@ Guidance for agents (and humans) working in this repository.
 
 ## What this is
 
-`PhotosMetadata` reads a local macOS Photos library through
+`photojournaler` reads a local macOS Photos library through
 [osxphotos](https://github.com/RhetTbull/osxphotos) and:
 
 1. **Exports** rich per-asset metadata to JSON, CSV, and SQLite.

@@ -1,10 +1,10 @@
-# PhotosMetadata
+# photojournaler
 
-[![CI](https://github.com/ctkolb/PhotosMetadata/actions/workflows/ci.yml/badge.svg)](https://github.com/ctkolb/PhotosMetadata/actions/workflows/ci.yml)
+[![CI](https://github.com/ctkolb/photojournaler/actions/workflows/ci.yml/badge.svg)](https://github.com/ctkolb/photojournaler/actions/workflows/ci.yml)
 
 Turn an Apple Photos library into a readable **photo journal**.
 
-PhotosMetadata reads your local macOS Photos library, works out which photos
+**photojournaler** reads your local macOS Photos library, works out which photos
 are actually yours (taken with your phone, not saved or shared), and writes a
 journal: a short story for every day, grouped by place, with a link to an
 example photo. It never moves, edits, uploads, or resizes your photos.
