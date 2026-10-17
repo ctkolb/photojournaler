@@ -2,33 +2,37 @@
 
 [![CI](https://github.com/ctkolb/photojournaler/actions/workflows/ci.yml/badge.svg)](https://github.com/ctkolb/photojournaler/actions/workflows/ci.yml)
 
-Turn an Apple Photos library into a readable **photo journal**.
+Turn an Apple Photos library into a readable **photo journal**: a short story
+for every day, grouped by place, with links to example photos.
 
-**photojournaler** reads your local macOS Photos library, works out which photos
-are actually yours (taken with your phone, not saved or shared), and writes a
-journal: a short story for every day, grouped by place, with a link to an
-example photo. It never moves, edits, uploads, or resizes your photos.
+photojournaler isn't a click-to-run app. It's a small, deterministic **engine**
+plus guidance, meant to be driven by an **AI coding agent** (Claude Code,
+Cursor, opencode, Codex, …). You point your agent at this repo, describe the
+journal you want, and the agent sets everything up, runs the pipeline, and
+writes the journal for you. The engine underneath is plain scripts, so any run
+is reproducible — but you're not expected to type the commands yourself.
 
-> **Requirements:** macOS with the Photos app. The library is read through
-> Photos' own database (with [osxphotos](https://github.com/RhetTbull/osxphotos)),
+> **Requirements:** a Mac with the **Photos** app. The library is read through
+> Photos' own database (via [osxphotos](https://github.com/RhetTbull/osxphotos)),
 > so photos that live only in iCloud still contribute whatever metadata the
-> database already holds. No photos are downloaded.
+> database already holds. No photos are downloaded, moved, edited, or uploaded.
 
-## Quick start
+## Getting started
 
-```sh
-python3 -m venv .venv
-.venv/bin/pip install -r requirements.txt
+1. Open this repository in your AI coding agent of choice.
+2. Ask it to build your journal. For example:
 
-# Export your library's metadata into ./out
-.venv/bin/python export_photos_metadata.py
+   > Read `AGENTS.md`, then build a photo journal from my Photos library into
+   > `out/journal.md`. Skip screenshots and junk, and don't include my own name
+   > in the "with …" lists.
 
-# Build the journal
-.venv/bin/python build_journal.py --out out/journal.md
+3. The agent will create the virtual environment, install dependencies, export
+   your library's metadata, and write the journal. When it's done you'll have
+   `out/journal.md` (and, if you ask, a self-contained `out/journal.html`).
 
-# …or a self-contained page you can open in a browser
-.venv/bin/python build_journal.py --out out/journal.html
-```
+You stay in the loop: tell the agent to change the format, group more/less,
+include multiple years, link photos differently, and so on. `AGENTS.md` in this
+repo tells the agent how the engine works so it can do this without guessing.
 
 ## What the journal looks like
 
@@ -61,75 +65,74 @@ afternoon they were at Northside Transit Center — Lakeside, IL, taking photos 
 train station with a large advertisement on the side of it. …
 ```
 
-The journal is written to a single running file, grouped
-**year → month → day**, with a bold location line per place and one bullet per
-caption cluster.
+The journal is a single running file, grouped **year → month → day**, with a
+bold location line per place and one line per cluster of similar photos. Each
+count links to one example photo.
 
-## What gets included
+## What goes in — and what doesn't
 
-- **Only your phone.** Your phone is inferred from the data (see below); other
-  people's phones and DSLRs are dropped.
+- **Only your phone.** Your phone is inferred from the data; other people's
+  phones and DSLRs are dropped.
 - **Only camera photos.** Screenshots, screen recordings, saved GIFs, and images
   received via Messages/WhatsApp/etc. are excluded.
 - **No clutter.** Low-value shots — documents, barcodes, receipts, menus, and
-  boxes — are dropped (`--keep-junk` keeps them).
+  boxes — are dropped.
 - **No duplicates.** Album-export copies are collapsed so counts reflect real
   captures.
+- **Grounded descriptions.** Every phrase comes from Apple's on-device ML
+  captions, labels, and OCR. **Nothing is invented or editorialized.**
 
-## How the journal is built
+## Under the hood
 
-The pipeline is deterministic and lives in `photosmeta/journal.py`:
+The engine is deterministic and lives in `photosmeta/journal.py`. The
+`build_journal.py` CLI wires it together. Given the same library, it always
+produces the same journal.
 
 1. **Owner inference.** Each month, the most common *numeric iPhone* is treated
-   as the owner's; the owner's model is only allowed to move to a newer
-   generation, then tier (`Pro Max` > `Pro` > `Plus` > base). On a typical
-   library this yields a progression like
+   as the owner's; the owner's model only ever moves to a newer generation, then
+   tier (`Pro Max` > `Pro` > `Plus` > base). Typical result:
    `iPhone 13 Pro → iPhone 16 Pro (Sep 20, 2024) → iPhone 17 Pro Max (Jun 7, 2026)`.
-2. **Selection & de-duplication**, as described above.
-3. **Batching.** Photos at the same place within a 75-minute gap are grouped.
-   A new place starts when you move more than `--location-degrees` (~0.5 km).
+2. **Selection & de-duplication** (see above).
+3. **Batching.** Photos at the same place within a 75-minute gap are grouped; a
+   new place starts once you move more than ~0.5 km.
 4. **Clustering.** Near-identical and reworded captions collapse into one line,
-   comparing *content words*. `--similarity` tunes how aggressively (lower
-   groups more; too low merges different subjects).
-5. **Places.** Locations are colloquial and as specific as the data allows:
-   venues, landmarks, areas of interest, bodies of water, and neighborhoods
-   win, then the leading place name (e.g. `Millennium Station`), then the
-   street. Highways are skipped. Home is rendered as `Home — Fairview, TX`.
-6. **Narrative.** See below.
-7. **Photo links.** See below.
+   comparing *content words*.
+5. **Places.** Colloquial and as specific as the data allows: venues, landmarks,
+   areas of interest, bodies of water, and neighborhoods win, then the leading
+   place name (e.g. `Millennium Station`), then the street. Highways are skipped,
+   and home is rendered as `Home — Fairview, TX`.
+6. **Narrative.** A story for each day, told in order (where / who / what) and
+   built only from that day's metadata. Days far from home get more detail, and
+   consecutive far-off days read as one continuing trip instead of restarting.
+7. **Photo links.** Each count links to one example photo.
 
-Descriptions come only from Apple's on-device ML (`ai_caption`, labels, OCR).
-**The journal never invents or editorializes.**
+### Files
 
-### The daily narrative
+| Path | Purpose |
+|---|---|
+| `photosmeta/journal.py` | The journal engine (owner inference, selection, batching, clustering, places, narrative, rendering) |
+| `build_journal.py` | CLI that drives the engine and writes `out/journal.md` or `out/journal.html` |
+| `export_photos_metadata.py` | Exports the library's metadata to JSON/CSV/SQLite |
+| `analyze_photos_metadata.py` | Prints a summary / renders an HTML stats report |
+| `AGENTS.md` | Guidance the agent reads (layout, pipeline, conventions) |
+| `out/` | Generated output (`journal.md`, `photos/` previews, exports) |
 
-Each day opens with a story told like you'd tell a friend: where you were, who
-you were with, and what you did — in order. It is built *only* from that day's
-metadata (places and times, people/pets, activities and holidays, and the day's
-most common captions), so nothing is made up.
+## Running the scripts directly (optional)
 
-- **Farther from home ⇒ longer story.** Distance is measured from your home
-  coordinate, so a day trip or vacation gets more detail than a day around the
-  house.
-- **Trips continue, they don't restart.** Consecutive days far from home and near
-  each other read as one trip (`they set out for …` → `the trip continued
-  around …` → `they were back home`).
+The agent normally runs these for you, but the engine is usable on its own:
 
-Disable it with `--no-narrative`. Pass `--owner-name "Your Name"` to keep your
-own name out of the `with …` lists.
+```sh
+python3 -m venv .venv
+.venv/bin/pip install -r requirements.txt
 
-### Opening a photo
+# Export your library's metadata into ./out
+.venv/bin/python export_photos_metadata.py
 
-Each count links to one example photo from that line. By default (`--link
-thumb`) a small preview is copied into `out/photos/`, next to the journal, and
-linked **relatively** — `photos/<uuid>.jpg` — which works in VS Code's Markdown
-preview and in a browser. Other modes: `photos` opens the Photos app
-(`photos://asset?identifier=<uuid>`); `preview`/`original` link the file inside
-the library with `file://` (some viewers won't clickify these, and macOS privacy
-protection blocks the browser from reading `~/Pictures`); `none` leaves plain
-counts. Anything without a local file falls back to the `photos` scheme.
+# Build the journal (markdown), or pass --out out/journal.html for a web page
+.venv/bin/python build_journal.py --out out/journal.md
+```
 
-## Journal options
+### Journal options
 
 | Flag | Description |
 |---|---|
@@ -144,59 +147,19 @@ counts. Anything without a local file falls back to the `photos` scheme.
 | `--keep-junk` | Keep low-value shots (documents, barcodes, receipts, menus, boxes) |
 | `--no-narrative` | Omit the per-day story |
 | `--owner-name NAME` | Person to omit from `with …` (the journal owner; repeatable) |
-| `--quiet` | Suppress the summary |
 
-Build the journal from several per-year exports in one running file:
+`--link thumb` (the default) copies a small preview into `out/photos/` and links
+it relatively, which works in VS Code's preview and in a browser. `photos` uses
+the Photos app URL scheme; `preview`/`original` link the file inside the library
+with `file://` (often blocked, because macOS protects `~/Pictures`).
 
-```sh
-.venv/bin/python build_journal.py \
-  out/2024/photos.sqlite out/2025/photos.sqlite out/photos.sqlite \
-  --out out/journal.md --owner-name "Your Name"
-```
+### Export options
 
-## Exporting the metadata (used by the journal)
-
-`export_photos_metadata.py` writes everything the journal needs — and a lot more
-— to JSON, CSV, and SQLite.
-
-```sh
-.venv/bin/python export_photos_metadata.py                     # all formats into ./out
-.venv/bin/python export_photos_metadata.py --formats sqlite    # just SQLite
-.venv/bin/python export_photos_metadata.py --since 2024-01-01 --until 2024-12-31
-.venv/bin/python export_photos_metadata.py --album "Favorites" --person "Jordan"
-```
-
-| Flag | Description |
-|---|---|
-| `--library PATH` | `.photoslibrary` to read (default: system library) |
-| `--outdir DIR` | Output directory (default: `./out`) |
-| `--prefix NAME` | Output filename prefix (default: `photos`) |
-| `--formats LIST` | Any of `json,csv,sqlite` (default: all) |
-| `--album` / `--person` / `--keyword` | Filter (repeatable) |
-| `--since` / `--until` | Capture-date range, `YYYY-MM-DD` |
-| `--limit N` | Stop after N assets (testing) |
-| `--no-ml` | Skip captions, labels, image analysis (faster) |
-
-Each asset captures identity, time, place, EXIF, video, image dimensions, flags
-(favorite, screenshot, live photo, …), albums/keywords, people, and Apple's ML
-(`ai_caption` + confidence, normalized labels, OCR text, and the full
-search-index dictionary: activities, pets, landmarks, holidays, seasons, and
-more).
-
-### Output files
-
-- `photos.json` — one nested object per asset, full fidelity
-- `photos.csv` — one flat row per asset
-- `photos.sqlite` — a `photos` table plus join tables, indexed on date, country,
-  and camera
-- `journal.md` / `journal.html` — the generated journal (`out/photos/` holds its
-  preview images)
-
-## Analyzing an export
-
-`analyze_photos_metadata.py` prints a summary and can render a self-contained
-HTML report (calendar heatmap, rankings for year, camera, country, people,
-labels, albums):
+`export_photos_metadata.py` writes everything the journal needs — and more — to
+JSON, CSV, and SQLite (`--formats`, `--since/--until`, `--album/--person/--keyword`,
+`--no-ml`, …). `analyze_photos_metadata.py` summarizes an export or renders a
+self-contained HTML report (calendar heatmap, rankings for year, camera,
+country, people, labels, albums):
 
 ```sh
 .venv/bin/python analyze_photos_metadata.py out/photos.sqlite --html report.html
@@ -216,10 +179,10 @@ runs anywhere in under a second:
 
 `.github/workflows/ci.yml` runs the tests on every push and PR to `main`, on a
 macOS runner (required, since importing `osxphotos` needs macOS). The job is
-named **`test`**; that is the required status check enforced by branch
-protection (see [`docs/branch-protection.md`](docs/branch-protection.md)).
+named **`test`**, the required status check enforced by branch protection (see
+[`docs/branch-protection.md`](docs/branch-protection.md)).
 
-## For contributors
+## For contributors and agents
 
 See [`AGENTS.md`](AGENTS.md) for the repository layout, the journal pipeline
 internals, and conventions.
