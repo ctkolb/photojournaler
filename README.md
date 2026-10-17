@@ -68,8 +68,8 @@ caption cluster.
 ## What gets included
 
 - **Only your phone.** Your phone is inferred from the data (see below); other
-  people's phones and DSLRs are dropped. Pass `--no-owner` to include every
-  camera instead.
+  people's phones and DSLRs are dropped. Pass `--no-speculative-id` to include
+  every camera instead.
 - **Only camera photos.** Screenshots, screen recordings, saved GIFs, and images
   received via Messages/WhatsApp/etc. are excluded.
 - **No clutter.** Low-value shots — documents, barcodes, receipts, menus, and
@@ -78,7 +78,9 @@ caption cluster.
   captures.
 - **Location from nearby shots.** A photo with no location adopts the location of
   the nearest located photo within `--inherit-minutes` (default 5; `0` disables)
-  — from your phone only, or from any camera with `--no-owner`.
+  — from your phone only, or from any camera with `--no-speculative-id`. A photo
+  that has GPS but no place name is named after the nearest located photo within
+  `--gps-name-km` kilometers (default 0.1; `0` disables).
 
 ## How the journal is built
 
@@ -135,6 +137,9 @@ counts. Anything without a local file falls back to the `photos` scheme.
 
 ## Journal options
 
+Every option can also be set in a YAML config (see below); a flag overrides the
+config, and the config overrides the defaults.
+
 | Flag | Description |
 |---|---|
 | `inputs` | One or more `photos.sqlite` / `photos.json` exports (default: `out/photos.sqlite`) |
@@ -145,12 +150,31 @@ counts. Anything without a local file falls back to the `photos` scheme.
 | `--link MODE` | Link each count: `thumb`, `preview`, `original`, `photos`, `none` (default: `thumb`) |
 | `--library PATH` | Photos library used to resolve links (default: `~/Pictures/Photos Library.photoslibrary`) |
 | `--thumb-size N` | Long-edge pixels for `--link thumb` (default: 400) |
-| `--no-owner` | Include every camera, not just the owner's phone |
+| `--no-speculative-id` | Include every camera, not just the inferred owner's phone |
 | `--inherit-minutes N` | Give a location-less photo the nearest located photo's place within N minutes (default: 5; `0` disables) |
+| `--gps-name-km F` | Name a GPS-only photo after the nearest located photo within F km (default: 0.1; `0` disables) |
 | `--keep-junk` | Keep low-value shots (documents, barcodes, receipts, menus, boxes) |
 | `--no-narrative` | Omit the per-day story |
 | `--owner-name NAME` | Person to omit from `with …` (the journal owner; repeatable) |
 | `--quiet` | Suppress the summary |
+
+### Configuration
+
+Any option can live in a YAML file, keyed by the flag name:
+
+```yaml
+gap-minutes: 75
+no-speculative-id: false
+gps-name-km: 0.1
+owner-name: ["Your Name"]
+```
+
+- `--config PATH` uses that config; otherwise `./config.yaml` is used when it
+  exists, and settings it omits fall back to the defaults.
+- Flags override only the config keys they specify.
+- `--generate-config [PATH]` writes a config from the defaults (with any given
+  flags applied) and exits — `config.yaml` by default. It does not build the
+  journal.
 
 Build the journal from several per-year exports in one running file:
 
