@@ -1,0 +1,653 @@
+"""Tests for photosmeta.journal and the build_journal CLI."""
+
+from __future__ import annotations
+
+import base64
+import json
+import shutil
+from datetime import datetime, timezone, timedelta
+
+import pytest
+
+import build_journal
+from photosmeta import journal as j
+from photosmeta import build_record
+from photosmeta.writers import SqliteWriter
+
+from conftest import make_photo
+
+CST = timezone(timedelta(hours=-6))
+TINY_PNG = base64.b64decode(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=="
+)
+
+
+def photo(date, camera="iPhone 13 Pro", **overrides):
+    fields = dict(screenshot=False, media_type="photo", favorite=False)
+    fields.update(overrides)
+    return j.Photo(date_original=date, camera_model=camera, **fields)
+
+
+def entry(date, caption=None, labels=None, favorite=False, video=False,
+          camera="iPhone 13 Pro", uuid=None, filename=None):
+    return j.Entry(
+        dt=datetime.fromisoformat(date), caption=caption, labels=labels,
+        favorite=favorite, video=video, camera=camera, uuid=uuid, filename=filename,
+    )
+
+
+# --- model ranking --------------------------------------------------------
+
+def test_model_rank_orders_generation_then_tier():
+    assert j.model_rank("iPhone 16 Pro") > j.model_rank("iPhone 13 Pro")
+    assert j.model_rank("iPhone 17 Pro Max") > j.model_rank("iPhone 17 Pro")
+    assert j.model_rank("iPhone 17 Pro") > j.model_rank("iPhone 17")
+    assert j.model_rank("iPhone 15 Plus") > j.model_rank("iPhone 15")
+
+
+def test_model_rank_rejects_non_phones():
+    assert j.model_rank("Canon EOS 7D") is None
+    assert j.model_rank("iPhone SE (3rd generation)") is None
+    assert j.model_rank(None) is None
+
+
+# --- owner inference ------------------------------------------------------
+
+def test_infer_owner_windows_is_monotonic_and_newer():
+    photos = [
+        photo("2024-01-05T10:00:00-06:00", "iPhone 13 Pro"),
+        photo("2024-01-06T10:00:00-06:00", "iPhone 13 Pro"),
+        photo("2024-09-20T10:00:00-05:00", "iPhone 16 Pro"),
+        photo("2024-10-01T10:00:00-05:00", "iPhone 16 Pro"),
+        photo("2026-06-07T10:00:00-05:00", "iPhone 17 Pro Max"),
+        photo("2026-06-08T10:00:00-05:00", "iPhone 17 Pro Max"),
+    ]
+    windows = j.infer_owner_windows(photos)
+    assert windows == [
+        ("2024-01-05T10:00:00-06:00", "iPhone 13 Pro"),
+        ("2024-09-20T10:00:00-05:00", "iPhone 16 Pro"),
+        ("2026-06-07T10:00:00-05:00", "iPhone 17 Pro Max"),
+    ]
+
+
+def test_infer_owner_windows_ignores_family_phone_that_never_dominates():
+    photos = [
+        photo("2024-06-01T10:00:00-05:00", "iPhone 13 Pro"),
+        photo("2024-06-02T10:00:00-05:00", "iPhone 13 Pro"),
+        photo("2024-06-03T10:00:00-05:00", "iPhone 13 Pro"),
+        # A newer family phone, but never the most common.
+        photo("2024-06-04T10:00:00-05:00", "iPhone 15 Pro"),
+    ]
+    windows = j.infer_owner_windows(photos)
+    assert [model for _, model in windows] == ["iPhone 13 Pro"]
+
+
+def test_infer_owner_windows_ignores_dslr_only_months():
+    photos = [
+        photo("2024-06-01T10:00:00-05:00", "iPhone 13 Pro"),
+        photo("2024-07-01T10:00:00-05:00", "Canon EOS 7D"),
+        photo("2024-07-02T10:00:00-05:00", "Canon EOS 7D"),
+    ]
+    assert [model for _, model in j.infer_owner_windows(photos)] == ["iPhone 13 Pro"]
+
+
+def test_owner_model_lookup_uses_window_start():
+    windows = [("2024-01-01", "iPhone 13 Pro"), ("2024-09-20", "iPhone 16 Pro")]
+    assert j.owner_model("2024-09-19T23:00:00-05:00", windows) == "iPhone 13 Pro"
+    assert j.owner_model("2024-09-20T00:00:00-05:00", windows) == "iPhone 16 Pro"
+    assert j.owner_model("2023-12-31T00:00:00-06:00", windows) is None
+
+
+# --- filtering and selection ---------------------------------------------
+
+def test_is_camera_photo_filters_noise():
+    assert j.is_camera_photo(photo("2024-01-01T10:00:00-06:00"))
+    assert not j.is_camera_photo(photo("2024-01-01T10:00:00-06:00", screenshot=True))
+    assert not j.is_camera_photo(
+        photo("2024-01-01T10:00:00-06:00", search_info={"media_types": ["Screenshots"]})
+    )
+    assert not j.is_camera_photo(
+        photo("2024-01-01T10:00:00-06:00", search_info={"media_types": ["Screen Recordings"]})
+    )
+    assert not j.is_camera_photo(
+        photo("2024-01-01T10:00:00-06:00", search_info={"source": "Messages"})
+    )
+
+
+def test_select_owner_photos_filters_dedups_and_sorts():
+    windows = [("2024-01-01", "iPhone 13 Pro")]
+    photos = [
+        photo("2024-01-03T10:00:00-06:00", "iPhone 13 Pro", ai_caption="b"),
+        photo("2024-01-02T10:00:00-06:00", "iPhone 13 Pro", ai_caption="a"),
+        photo("2024-01-02T10:00:00-06:00", "iPhone 13 Pro", ai_caption="dup"),
+        photo("2024-01-02T10:00:00-06:00", "iPhone 15 Pro", ai_caption="family"),
+        photo("2024-01-02T10:00:00-06:00", "Canon EOS 7D", ai_caption="dslr"),
+        photo("2024-01-02T10:00:00-06:00", "iPhone 13 Pro", screenshot=True),
+    ]
+    selected = j.select_owner_photos(photos, windows)
+    assert [p.ai_caption for p in selected] == ["a", "b"]
+
+
+def test_is_noise_flags_documents_menus_and_boxes():
+    assert j.is_noise(photo("2024-01-01T10:00:00-06:00",
+                            ai_caption="a close up of a barcode on a white background"))
+    assert j.is_noise(photo("2024-01-01T10:00:00-06:00",
+                            ai_caption="a restaurant menu on a wooden surface"))
+    assert j.is_noise(photo("2024-01-01T10:00:00-06:00",
+                            ai_caption="a close up of a box of food on a table"))
+    assert j.is_noise(photo("2024-01-01T10:00:00-06:00",
+                            ai_caption="a piece of paper with writing on it"))
+    assert j.is_noise(photo("2024-01-01T10:00:00-06:00", labels="document, receipt"))
+
+
+def test_is_noise_keeps_animals_and_regular_photos():
+    assert not j.is_noise(photo("2024-01-01T10:00:00-06:00",
+                                ai_caption="a black and white cat sitting in a cardboard box"))
+    assert not j.is_noise(photo("2024-01-01T10:00:00-06:00",
+                                ai_caption="a group of people standing in front of a building"))
+    assert not j.is_noise(photo("2024-01-01T10:00:00-06:00"))
+
+
+def test_select_owner_photos_drops_noise_by_default():
+    windows = [("2024-01-01", "iPhone 13 Pro")]
+    clean = photo("2024-01-01T10:00:00-06:00", "iPhone 13 Pro", ai_caption="a cat on a couch")
+    junk = photo("2024-01-01T11:00:00-06:00", "iPhone 13 Pro",
+                 ai_caption="a close up of a barcode")
+    assert [p.ai_caption for p in j.select_owner_photos([clean, junk], windows)] == \
+        ["a cat on a couch"]
+    assert len(j.select_owner_photos([clean, junk], windows, keep_noise=True)) == 2
+
+
+# --- location labels ------------------------------------------------------
+
+def test_location_label_variants():
+    assert j.location_label(
+        photo("2024-01-01T10:00:00-06:00", place_address="100 Example St, Fairview, TX")
+    ) == j.HOME_LABEL
+    assert j.location_label(
+        photo("2024-01-01T10:00:00-06:00", place_name="Riverside, Texas, United States")
+    ) == j.HOME_LABEL
+    assert j.location_label(
+        photo("2024-01-01T10:00:00-06:00", search_info={
+            "venues": ["Delhi6 Indian Kitchen"], "city": "Bengaluru",
+            "state_abbreviation": "KA"})
+    ) == "Delhi6 Indian Kitchen — Bengaluru, KA"
+    assert j.location_label(
+        photo("2024-01-01T10:00:00-06:00", search_info={
+            "landmarks": ["Alamo Mission"], "city": "San Antonio",
+            "state_abbreviation": "TX"})
+    ) == "Alamo Mission — San Antonio, TX"
+    assert j.location_label(
+        photo("2024-01-01T10:00:00-06:00", search_info={
+            "city": "Paris", "state_abbreviation": ""})
+    ) == "Paris"
+    assert j.location_label(photo("2024-01-01T10:00:00-06:00")) == j.UNKNOWN
+
+
+def test_location_label_prefers_specific_place_name_over_town():
+    label = j.location_label(photo(
+        "2024-05-27T18:54:00-05:00",
+        place_name="Millennium Station, Chicago, Chicagoland, United States",
+        search_info={"city": "Chicago", "state_abbreviation": "IL"},
+    ))
+    assert label == "Millennium Station — Chicago, IL"
+
+
+def test_location_label_uses_area_and_neighborhood():
+    assert j.location_label(photo(
+        "2024-05-28T08:00:00-05:00",
+        place_name="Chicago, Chicagoland, United States, Chicago River",
+        search_info={"city": "Chicago", "state_abbreviation": "IL",
+                     "areas_of_interest": ["Chicago River"]},
+    )) == "Chicago River"
+    assert j.location_label(photo(
+        "2024-01-01T10:00:00-06:00",
+        search_info={"city": "Bengaluru", "state_abbreviation": "KA",
+                     "neighborhoods": ["Whitefield"]},
+    )) == "Whitefield — Bengaluru, KA"
+
+
+def test_location_label_skips_highways():
+    assert j.location_label(photo(
+        "2024-01-01T10:00:00-06:00",
+        place_name="I-280 S, San Jose, CA, United States",
+        search_info={"city": "San Jose", "state_abbreviation": "CA",
+                     "streets": ["I-280 S"]},
+    )) == "San Jose, CA"
+    assert j.location_label(photo(
+        "2024-01-01T10:00:00-06:00",
+        search_info={"city": "Chicago", "state_abbreviation": "IL",
+                     "streets": ["N Riverside Plaza"]},
+    )) == "N Riverside Plaza — Chicago, IL"
+
+
+# --- text helpers ---------------------------------------------------------
+
+def test_sentence_and_plural():
+    assert j.sentence("a sandy beach") == "A sandy beach"
+    assert j.plural(1, "photo") == "1 photo"
+    assert j.plural(3, "photo") == "3 photos"
+    assert j.count_note(1, video=True) == "1 video"
+    assert j.count_note(2, video=True) == "2 photos/videos"
+    assert j.count_note(1, video=False) == "1 photo"
+
+
+def test_format_owner_phones():
+    windows = [("2024-01-01", "iPhone 13 Pro"),
+               ("2024-09-20", "iPhone 16 Pro"),
+               ("2026-06-07", "iPhone 17 Pro Max")]
+    assert j.format_owner_phones(windows) == (
+        "iPhone 13 Pro → iPhone 16 Pro (Sep 20, 2024) → iPhone 17 Pro Max (Jun 7, 2026)"
+    )
+    assert j.format_owner_phones([]) == "unknown"
+
+
+# --- clustering -----------------------------------------------------------
+
+def test_cluster_entries_merges_similar_captions():
+    entries = [
+        entry("2024-01-01T10:00:00", "a group of fish swimming in a fish tank"),
+        entry("2024-01-01T10:01:00", "a group of fish swimming in a tank"),
+        entry("2024-01-01T11:00:00", "a plate of food on a table"),
+    ]
+    clusters = j.cluster_entries(entries)
+    assert len(clusters) == 2
+    assert len(clusters[0][1]) == 2
+
+
+def test_cluster_entries_groups_reworded_captions():
+    entries = [
+        entry("2024-01-01T10:00:00", "a group of people standing in front of a building"),
+        entry("2024-01-01T10:01:00", "people standing outside a building"),
+    ]
+    assert len(j.cluster_entries(entries, 0.5)) == 1
+
+
+def test_cluster_entries_label_fallback_for_uncaptioned():
+    entries = [
+        entry("2024-01-01T10:00:00", None, labels="horse, riding, outdoor"),
+        entry("2024-01-01T10:01:00", None, labels="horse, riding, outdoor"),
+    ]
+    clusters = j.cluster_entries(entries)
+    assert len(clusters) == 1
+    assert clusters[0][0] == "horse, riding, outdoor"
+
+
+# --- batching -------------------------------------------------------------
+
+def test_build_batches_splits_on_gap_and_location():
+    photos = [
+        photo("2024-01-01T10:00:00-06:00", search_info={"city": "Fairview"}),
+        photo("2024-01-01T10:10:00-06:00", search_info={"city": "Fairview"}),
+        photo("2024-01-01T14:00:00-06:00", search_info={"city": "Fairview"}),  # gap
+        photo("2024-01-01T14:05:00-06:00", search_info={
+            "venues": ["Some Cafe"], "city": "Dallas", "state_abbreviation": "TX"}),
+    ]
+    batches = j.build_batches(photos)
+    assert [len(b.entries) for b in batches] == [2, 1, 1]
+    assert batches[2].location == "Some Cafe — Dallas, TX"
+
+
+def test_build_batches_inherits_location_for_missing_gps():
+    photos = [
+        photo("2024-01-01T10:00:00-06:00", search_info={
+            "venues": ["Some Cafe"], "city": "Dallas", "state_abbreviation": "TX"}),
+        photo("2024-01-01T10:05:00-06:00"),  # no location, within the gap
+    ]
+    batches = j.build_batches(photos)
+    assert len(batches) == 1
+    assert batches[0].location == "Some Cafe — Dallas, TX"
+
+
+def test_build_batches_collects_people_and_activities():
+    photos = [
+        photo("2024-01-01T10:00:00-06:00", persons="Riley, _UNKNOWN_, Leo",
+              search_info={"activities": ["Dining"], "holidays": ["Carnival"]}),
+    ]
+    batch = j.build_batches(photos)[0]
+    assert batch.names == {"Riley", "Leo"}
+    assert batch.activities == {"Dining"}
+    assert batch.holidays == {"Carnival"}
+
+
+def test_build_batches_excludes_owner_name():
+    photos = [photo("2024-01-01T10:00:00-06:00", persons="Riley, Alex Doe")]
+    batch = j.build_batches(photos, owner_name={"Alex Doe"})[0]
+    assert batch.names == {"Riley"}
+
+
+def test_build_batches_splits_on_distance_from_anchor():
+    def at(lat):
+        return photo("2024-01-01T10:00:00-06:00", latitude=lat, longitude=-87.0,
+                     search_info={"city": "Chicago", "state_abbreviation": "IL"})
+
+    # First photo sets the anchor; the third is >0.005° away from it.
+    batches = j.build_batches([
+        at(41.000), at(41.003), at(41.006),
+    ])
+    assert [len(b.entries) for b in batches] == [2, 1]
+    assert all(b.location == "Chicago, IL" for b in batches)
+
+
+def test_build_batches_distance_threshold_is_configurable():
+    def at(lat):
+        return photo("2024-01-01T10:00:00-06:00", latitude=lat, longitude=-87.0,
+                     search_info={"city": "Chicago", "state_abbreviation": "IL"})
+
+    photos = [at(41.000), at(41.010)]
+    assert len(j.build_batches(photos)) == 2
+    assert len(j.build_batches(photos, location_degrees=0.1)) == 1
+
+
+# --- rendering ------------------------------------------------------------
+
+def test_render_structure_and_grammar():
+    photos = [
+        photo("2024-01-01T09:56:00-06:00", ai_caption="a child sleeping on a couch",
+              persons="Ava", favorite=True,
+              search_info={"city": "Fairview", "home": "Home"}),
+        photo("2024-01-03T19:22:00-06:00", ai_caption="a group of fish swimming",
+              media_type="video"),
+    ]
+    windows = j.infer_owner_windows(photos)
+    doc = j.render(j.build_batches(j.select_owner_photos(photos, windows)), windows)
+    assert doc.startswith("# Photo Journal")
+    assert "## 2024" in doc
+    assert "### January 2024" in doc
+    assert "#### Monday, January 1 · iPhone 13 Pro" in doc
+    assert "**Home — Fairview, TX**" in doc
+    assert "*(1 photo; ★1)*" in doc
+    assert "with Ava" in doc
+    assert "*(1 video)*" in doc
+    assert "1 photos" not in doc
+
+
+def test_render_empty_has_header_only():
+    doc = j.render([], [])
+    assert doc.startswith("# Photo Journal")
+    assert "owner photos" not in doc
+
+
+# --- photo links ----------------------------------------------------------
+
+UUID = "ABCDEF00-0000-0000-0000-000000000000"
+
+
+def _entry_with_asset(uuid=UUID, filename="ABCDEF00-0000-0000-0000-000000000000.heic"):
+    return entry("2024-01-01T10:00:00", caption="a cat", uuid=uuid, filename=filename)
+
+
+def test_photo_url_preview_uses_jpeg_derivative(tmp_path):
+    derivative = tmp_path / "resources" / "derivatives" / "A" / f"{UUID}_1_105_c.jpeg"
+    derivative.parent.mkdir(parents=True)
+    derivative.write_bytes(b"jpeg")
+    url = j.photo_url(_entry_with_asset(), "preview", tmp_path)
+    assert url == derivative.as_uri()
+    assert url.startswith("file://")
+
+
+def test_photo_url_original_uses_originals(tmp_path):
+    original = tmp_path / "originals" / "A" / f"{UUID}.heic"
+    original.parent.mkdir(parents=True)
+    original.write_bytes(b"heic")
+    url = j.photo_url(_entry_with_asset(), "original", tmp_path)
+    assert url == original.as_uri()
+
+
+def test_photo_url_photos_mode_and_none(tmp_path):
+    entry_ = _entry_with_asset()
+    assert j.photo_url(entry_, "photos", tmp_path) == \
+        f"photos://asset?identifier={UUID}"
+    assert j.photo_url(entry_, "none", tmp_path) is None
+
+
+def test_photo_url_falls_back_to_photos_app(tmp_path):
+    # No files on disk -> the library path cannot resolve, so use the app scheme.
+    assert j.photo_url(_entry_with_asset(), "preview", tmp_path) == \
+        f"photos://asset?identifier={UUID}"
+    assert j.photo_url(_entry_with_asset(), "preview", None) == \
+        f"photos://asset?identifier={UUID}"
+
+
+def test_photo_url_without_uuid_is_none():
+    assert j.photo_url(entry("2024-01-01T10:00:00"), "preview", None) is None
+
+
+def test_photo_url_thumb_returns_relative_path(tmp_path):
+    thumb_dir = tmp_path / "photos"
+    thumb_dir.mkdir()
+    (thumb_dir / f"{UUID}.jpg").write_bytes(b"x")
+    url = j.photo_url(_entry_with_asset(), "thumb", tmp_path, thumb_dir)
+    assert url == f"photos/{UUID}.jpg"
+
+
+def test_photo_url_thumb_falls_back_without_source(tmp_path):
+    url = j.photo_url(_entry_with_asset(), "thumb", tmp_path, tmp_path / "photos")
+    assert url == f"photos://asset?identifier={UUID}"
+
+
+def test_materialize_thumbs_generates_files(tmp_path):
+    if not shutil.which("sips"):
+        pytest.skip("sips not available")
+    library = tmp_path / "lib"
+    original = library / "originals" / "A" / f"{UUID}.png"
+    original.parent.mkdir(parents=True)
+    original.write_bytes(TINY_PNG)
+    thumb_dir = tmp_path / "photos"
+    photos = [photo("2024-01-01T10:00:00-06:00", ai_caption="a cat", uuid=UUID,
+                    filename=f"{UUID}.png", search_info={"city": "Fairview"})]
+    windows = j.infer_owner_windows(photos)
+    batches = j.build_batches(j.select_owner_photos(photos, windows))
+    doc = j.render(batches, windows, link="thumb", library=library, thumb_dir=thumb_dir)
+    assert (thumb_dir / f"{UUID}.jpg").exists()
+    assert f"[1 photo](photos/{UUID}.jpg)" in doc
+
+
+def test_render_links_the_photo_count(tmp_path):
+    photos = [photo("2024-01-01T10:00:00-06:00", ai_caption="a cat",
+                    uuid=UUID, filename="x.heic", search_info={"city": "Fairview"})]
+    windows = j.infer_owner_windows(photos)
+    batches = j.build_batches(j.select_owner_photos(photos, windows))
+    doc = j.render(batches, windows, link="photos", library=tmp_path)
+    assert f"[1 photo](photos://asset?identifier={UUID})" in doc
+    # The link must not be nested inside emphasis/parentheses.
+    assert "*([1 photo]" not in doc
+    plain = j.render(batches, windows, link="none")
+    assert "photos://" not in plain
+    assert "*(1 photo)*" in plain
+
+
+def test_render_html_links_escapes_and_structure(tmp_path):
+    photos = [photo("2024-01-01T10:00:00-06:00", ai_caption="a cat & a dog <3",
+                    uuid=UUID, filename="x.heic", search_info={"city": "Fairview"})]
+    windows = j.infer_owner_windows(photos)
+    batches = j.build_batches(j.select_owner_photos(photos, windows))
+    doc = j.render_html(batches, windows, link="photos", library=tmp_path)
+    assert doc.startswith("<!DOCTYPE html>")
+    assert doc.rstrip().endswith("</html>")
+    assert f'<a href="photos://asset?identifier={UUID}">1 photo</a>' in doc
+    assert "<h2>2024</h2>" in doc
+    assert "&amp;" in doc and "&lt;3" in doc
+
+
+def test_render_html_unlinked_uses_emphasis(tmp_path):
+    photos = [photo("2024-01-01T10:00:00-06:00", ai_caption="a cat",
+                    search_info={"city": "Fairview"})]
+    windows = j.infer_owner_windows(photos)
+    batches = j.build_batches(j.select_owner_photos(photos, windows))
+    doc = j.render_html(batches, windows, link="none")
+    assert "<em>(1 photo)</em>" in doc
+    assert "<a href=" not in doc
+
+
+# --- narrative ------------------------------------------------------------
+
+def _day_narrative_for(photos):
+    batches = j.build_batches(j.select_owner_photos(photos))
+    items = [(batch, j.cluster_entries(batch.entries)) for batch in batches]
+    text, _ = j.day_narrative(batches[0].start.date(), items)
+    return text
+
+
+def test_day_narrative_single_location():
+    text = _day_narrative_for([
+        photo("2024-01-01T09:00:00-06:00", ai_caption="a cat on a couch",
+              search_info={"home": "Home"}),
+        photo("2024-01-01T10:00:00-06:00", ai_caption="a dog on a bed",
+              search_info={"home": "Home"}),
+    ])
+    assert text.startswith("On Monday, January 1, in the morning they were at home")
+
+
+def test_day_narrative_interleaves_where_who_what():
+    text = _day_narrative_for([
+        photo("2024-01-01T09:00:00-06:00", ai_caption="a cat",
+              persons="Ava", search_info={"home": "Home"}),
+        photo("2024-01-01T14:00:00-06:00", ai_caption="a museum",
+              search_info={"venues": ["Some Museum"], "city": "Dallas",
+                           "state_abbreviation": "TX"}),
+    ])
+    assert "with Ava" in text
+    assert "Some Museum — Dallas, TX" in text
+    assert "taking photos of a museum" in text
+
+
+def test_day_narrative_people_caption_describes_the_named_people():
+    text = _day_narrative_for([
+        photo("2024-01-01T14:00:00-06:00",
+              ai_caption="a group of people and children sitting at a table with bowls of food",
+              persons="Riley, Ava, Emma",
+              search_info={"venues": ["Some Cafe"], "city": "Dallas",
+                           "state_abbreviation": "TX"}),
+    ])
+    # The named people are the group in the photo, not companions of it.
+    assert "with Riley, Ava, and Emma, a group of people and children sitting at a table" in text
+    assert "taking photos of a group of people" not in text
+
+
+def test_day_narrative_trip_continuity():
+    home = (33.0, -97.0)
+
+    def narr(date, lat, lon, previous):
+        photos = [photo(f"{date}T12:00:00-06:00", ai_caption="a museum",
+                        latitude=lat, longitude=lon,
+                        search_info={"city": "Faraway", "state_abbreviation": "IL"})]
+        batches = j.build_batches(photos)
+        items = [(batch, j.cluster_entries(batch.entries)) for batch in batches]
+        day = j.parse_dt(f"{date}T00:00:00").date()
+        return j.day_narrative(day, items, home, previous)
+
+    text1, state1 = narr("2024-06-01", 41.0, -87.0, None)
+    text2, state2 = narr("2024-06-02", 41.001, -87.0, state1)
+    text3, _ = narr("2024-06-03", 30.0, -97.0, state2)
+    assert "set out for" in text1
+    assert "trip continued" in text2
+    assert "moved on to" in text3
+
+
+def test_day_narrative_scales_with_more_lines():
+    small = _day_narrative_for([
+        photo("2024-01-01T10:00:00-06:00", ai_caption="a cat")])
+    big = _day_narrative_for([
+        photo(f"2024-01-01T10:{i:02d}:00-06:00", ai_caption=f"scene number {i} unique {i}")
+        for i in range(30)])
+    assert len(big) > len(small)
+
+
+def test_render_can_omit_narrative():
+    photos = [photo("2024-01-01T09:00:00-06:00", ai_caption="a cat",
+                    search_info={"home": "Home"})]
+    batches = j.build_batches(j.select_owner_photos(photos))
+    assert "On Monday, January 1" in j.render(batches, narrative=True)
+    assert "On Monday, January 1" not in j.render(batches, narrative=False)
+
+
+def test_render_html_includes_narrative():
+    photos = [photo("2024-01-01T09:00:00-06:00", ai_caption="a cat",
+                    search_info={"home": "Home"})]
+    batches = j.build_batches(j.select_owner_photos(photos))
+    assert '<p class="narrative">' in j.render_html(batches, narrative=True)
+    assert '<p class="narrative">' not in j.render_html(batches, narrative=False)
+
+
+# --- end to end -----------------------------------------------------------
+
+def test_build_journal_selects_only_owner_photos():
+    photos = [
+        photo("2024-01-02T10:00:00-06:00", "iPhone 13 Pro", ai_caption="first"),
+        photo("2024-01-03T10:00:00-06:00", "iPhone 13 Pro", ai_caption="second"),
+        photo("2024-01-03T10:00:00-06:00", "iPhone 13 Pro", ai_caption="duplicate"),
+        photo("2024-01-03T10:00:00-06:00", "iPhone 15 Pro", ai_caption="family"),
+        photo("2024-01-03T10:00:00-06:00", "Canon EOS 7D", ai_caption="dslr"),
+    ]
+    doc = j.build_journal(photos)
+    assert "**2 owner photos" in doc
+    assert "family" not in doc and "dslr" not in doc
+
+
+# --- loaders --------------------------------------------------------------
+
+def _write_sqlite(records, path):
+    writer = SqliteWriter(path)
+    for record in records:
+        writer.write(record)
+    writer.close()
+
+
+def test_read_photos_from_sqlite(tmp_path):
+    records = [build_record(make_photo(ai_caption="a sandy beach"))]
+    path = tmp_path / "photos.sqlite"
+    _write_sqlite(records, path)
+    photos = j.read_photos([path])
+    assert len(photos) == 1
+    assert photos[0].camera_model == "iPhone 14 Pro"
+    assert photos[0].ai_caption == "a sandy beach"
+
+
+def test_read_photos_from_json(tmp_path):
+    record = build_record(make_photo(ai_caption="a sandy beach"))
+    path = tmp_path / "photos.json"
+    path.write_text(json.dumps([record]), encoding="utf-8")
+    photos = j.read_photos([path])
+    assert photos[0].camera_model == "iPhone 14 Pro"
+    assert photos[0].ai_caption == "a sandy beach"
+
+
+# --- CLI ------------------------------------------------------------------
+
+def test_cli_writes_journal(tmp_path, capsys):
+    records = [build_record(make_photo(ai_caption="a sandy beach"))]
+    sqlite_path = tmp_path / "photos.sqlite"
+    _write_sqlite(records, sqlite_path)
+    out = tmp_path / "journal.md"
+    code = build_journal.main([str(sqlite_path), "--out", str(out)])
+    assert code == 0
+    assert out.read_text().startswith("# Photo Journal")
+    assert "iPhone 14 Pro" in capsys.readouterr().out
+
+
+def test_cli_writes_html_for_html_extension(tmp_path):
+    records = [build_record(make_photo(ai_caption="a sandy beach"))]
+    sqlite_path = tmp_path / "photos.sqlite"
+    _write_sqlite(records, sqlite_path)
+    out = tmp_path / "journal.html"
+    code = build_journal.main([str(sqlite_path), "--out", str(out),
+                               "--link", "none", "--quiet"])
+    assert code == 0
+    text = out.read_text()
+    assert text.startswith("<!DOCTYPE html>")
+    assert text.rstrip().endswith("</html>")
+
+
+def test_cli_missing_input_returns_error(tmp_path, capsys):
+    code = build_journal.main([str(tmp_path / "nope.sqlite"), "--quiet"])
+    assert code == 1
+    assert "not found" in capsys.readouterr().err
+
+
+def test_default_inputs_use_root_export(tmp_path):
+    (tmp_path / "2024").mkdir()
+    (tmp_path / "2024" / "photos.sqlite").write_text("")
+    (tmp_path / "photos.sqlite").write_text("")
+    assert build_journal.default_inputs(tmp_path) == [tmp_path / "photos.sqlite"]
+    assert build_journal.default_inputs(tmp_path / "empty") == []
