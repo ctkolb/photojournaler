@@ -113,8 +113,9 @@ keep the steps separable and covered by `tests/test_journal.py`.
 - Locations are **colloquial** and as specific as the data allows:
   `location_label` prefers named venues, landmarks, areas of interest, bodies of
   water, and neighborhoods, then the leading place name (e.g. `Millennium
-  Station`), then the street, and only then the town. The home address is
-  rendered as `Home — Fairview, TX` (`HOME_ADDR` / `HOME_LABEL`).
+  Station`), then the street, and only then the town. Photos taken at home are
+  labeled with the configurable `Home` (default `Home`; set `home-label`,
+  `home-address`, and `home-place`).
 - A day is not one location: a new place is emitted once the camera moves more
   than `location_degrees` (~0.5 km) from the current place's anchor.
 - Descriptions come from Apple's on-device ML (`ai_caption`, labels, OCR) —

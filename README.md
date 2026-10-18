@@ -100,7 +100,8 @@ The pipeline is deterministic and lives in `photosmeta/journal.py`:
 5. **Places.** Locations are colloquial and as specific as the data allows:
    venues, landmarks, areas of interest, bodies of water, and neighborhoods
    win, then the leading place name (e.g. `Millennium Station`), then the
-   street. Highways are skipped. Home is rendered as `Home — Fairview, TX`.
+   street. Highways are skipped. Home is rendered as `Home` (configure it with
+   `--home-label`, `--home-address`, and `--home-place`).
 6. **Narrative.** See below.
 7. **Photo links.** See below.
 
@@ -156,6 +157,9 @@ config, and the config overrides the defaults.
 | `--keep-junk` / `--no-keep-junk` | Keep low-value shots (documents, barcodes, receipts, menus, boxes); dropped by default |
 | `--narrative` / `--no-narrative` | Write the per-day story (default), or `--no-…` to omit |
 | `--owner-name NAME` | Person to omit from `with …` (the journal owner; repeatable) |
+| `--home-label LABEL` | Label printed for photos taken at home (default: `Home`) |
+| `--home-address PREFIX` | Address prefix that marks a photo as taken at home (repeatable) |
+| `--home-place NAME` | Place name that marks a photo as taken at home (repeatable) |
 | `--quiet` | Suppress the summary |
 
 ### Configuration
@@ -167,6 +171,9 @@ gap-minutes: 75
 speculative-id: true
 location-guess-km: 0.1
 owner-name: ["Your Name"]
+home-label: Home — Fairview, TN
+home-address: ["100 Example St"]
+home-place: ["Fairview"]
 ```
 
 - `--config PATH` uses that config; otherwise `./config.yaml` is used when it

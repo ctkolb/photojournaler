@@ -12,14 +12,12 @@ _None yet._
 Grouped suggestions, not yet selected. `[hardcoded]` marks something that is
 currently a constant in the code (so it's a small change to expose).
 
-**Top recommendations:** `home-address`/`home-label`, `since`/`until`,
-`exclude-albums`, `cameras`, `videos`, `day-start-hour`, `pronoun` — these cover
-the most variation across users for the least complexity.
+**Top recommendations:** `since`/`until`, `exclude-albums`, `cameras`,
+`videos`, `day-start-hour`, `pronoun` — these cover the most variation across
+users for the least complexity.
 
 ### Identity & scope
 
-- `home-address` / `home-label` — the home street address and its display name
-  (`Home — Fairview, TX`). `[hardcoded]`
 - `since` / `until` — build a journal for a date range only (or `years: [...]`).
 - `include-albums` / `exclude-albums` — keep to, or drop, named albums.
 - `cameras` — explicitly allow/deny camera models (e.g. include a DSLR or a
