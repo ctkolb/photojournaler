@@ -580,6 +580,11 @@ def test_day_narrative_single_location():
     assert text.startswith("On Monday, January 1, in the morning they were at home")
 
 
+def test_day_narrative_singular_no_location():
+    text = _day_narrative_for([photo("2024-01-01T10:00:00-06:00", ai_caption="a cat")])
+    assert "the 1 photo has no location metadata" in text
+
+
 def test_day_narrative_interleaves_where_who_what():
     text = _day_narrative_for([
         photo("2024-01-01T09:00:00-06:00", ai_caption="a cat",

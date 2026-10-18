@@ -920,7 +920,8 @@ def day_narrative(day, items: list[tuple[Batch, list]], home=None, previous=None
 
     if not segments:
         noun = "photo" if n_photos == 1 else "photos"
-        sentences.append(f"On {date}, the {n_photos} {noun} have no location metadata.")
+        verb = "has" if n_photos == 1 else "have"
+        sentences.append(f"On {date}, the {n_photos} {noun} {verb} no location metadata.")
 
     holidays = sorted({h for batch, _ in items for h in batch.holidays})
     activities = sorted({a.lower() for batch, _ in items for a in batch.activities})
