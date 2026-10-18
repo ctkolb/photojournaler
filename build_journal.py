@@ -23,15 +23,19 @@ import yaml
 from photosmeta.journal import (
     DEFAULT_GAP_MINUTES,
     DEFAULT_HOME_LABEL,
+    DEFAULT_LINK,
     DEFAULT_LOCATION_GUESS_KM,
     DEFAULT_INHERIT_MINUTES,
     DEFAULT_LIBRARY,
     DEFAULT_LOCATION_DEGREES,
+    DEFAULT_NARRATIVE,
     DEFAULT_SIMILARITY,
     DEFAULT_THUMB_SIZE,
+    DEFAULT_VAULT_DIR,
     LINK_MODES,
     Home,
     build_journal,
+    build_vault,
     format_owner_phones,
     infer_owner_windows,
     read_photos,
@@ -44,6 +48,7 @@ DEFAULT_CONFIG = Path("config.yaml")
 CONFIG_KEYS: dict[str, str] = {
     "inputs": "inputs",
     "out": "out",
+    "vault": "vault",
     "gap-minutes": "gap_minutes",
     "similarity": "similarity",
     "location-degrees": "location_degrees",
@@ -65,17 +70,18 @@ CONFIG_KEYS: dict[str, str] = {
 DEFAULTS: dict = {
     "inputs": [],
     "out": "out/journal.md",
+    "vault": False,
     "gap-minutes": DEFAULT_GAP_MINUTES,
     "similarity": DEFAULT_SIMILARITY,
     "location-degrees": DEFAULT_LOCATION_DEGREES,
-    "link": "thumb",
+    "link": DEFAULT_LINK,
     "library": str(DEFAULT_LIBRARY),
     "thumb-size": DEFAULT_THUMB_SIZE,
     "speculative-id": True,
     "inherit-minutes": DEFAULT_INHERIT_MINUTES,
     "location-guess-km": DEFAULT_LOCATION_GUESS_KM,
     "keep-junk": False,
-    "narrative": True,
+    "narrative": DEFAULT_NARRATIVE,
     "owner-name": [],
     "home-label": DEFAULT_HOME_LABEL,
     "home-address": [],
@@ -106,6 +112,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
                              "defaults and any given flags, then exit")
     parser.add_argument("--out", default=argparse.SUPPRESS,
                         help="Output file; a .html path writes a browser-native page")
+    parser.add_argument("--vault", action=argparse.BooleanOptionalAction,
+                        default=argparse.SUPPRESS,
+                        help="Write per-year Obsidian notes plus a trip index into "
+                             f"{DEFAULT_VAULT_DIR} instead of a single journal file "
+                             "(use --no-vault for the single file)")
     parser.add_argument("--gap-minutes", type=int, default=argparse.SUPPRESS,
                         help="Split a batch after this idle gap")
     parser.add_argument("--similarity", type=float, default=argparse.SUPPRESS,
@@ -212,6 +223,11 @@ def main(argv: list[str] | None = None) -> int:
         settings.update(load_config(config_path))
     settings.update(overrides)
 
+    # An explicit --out targets a single file, so it wins over a vault default.
+    vault = settings["vault"]
+    if "out" in overrides and "vault" not in overrides:
+        vault = False
+
     inputs = [Path(p) for p in settings["inputs"]] or default_inputs()
     if not inputs:
         print("No input exports found (looked under ./out)", file=sys.stderr)
@@ -237,10 +253,35 @@ def main(argv: list[str] | None = None) -> int:
     selected = select_photos(photos, windows, owner, keep_noise,
                              settings["inherit-minutes"], settings["location-guess-km"],
                              home)
+    owner_names = set(settings["owner-name"]) or None
+
+    if vault:
+        vault_dir = Path(DEFAULT_VAULT_DIR)
+        files = build_vault(
+            photos, settings["gap-minutes"], settings["similarity"],
+            settings["location-degrees"], settings["link"], Path(settings["library"]),
+            vault_dir / "photos" if settings["link"] == "thumb" else None,
+            settings["thumb-size"], keep_noise, narrative, owner_names, owner,
+            settings["inherit-minutes"], settings["location-guess-km"], home,
+        )
+        vault_dir.mkdir(parents=True, exist_ok=True)
+        for name, text in files.items():
+            dest = vault_dir / name
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            dest.write_text(text, encoding="utf-8")
+        if not quiet:
+            print(f"Read {len(photos):,} assets from {len(inputs)} export(s)")
+            if owner:
+                print(f"Owner's phone: {format_owner_phones(windows)}")
+            else:
+                print("Speculative owner-phone detection: off (all cameras)")
+            print(f"Selected {len(selected):,} photos -> {vault_dir} "
+                  f"({len(files)} files)")
+        return 0
+
     out = Path(settings["out"])
     html = out.suffix.lower() in (".html", ".htm")
     thumb_dir = out.parent / "photos" if settings["link"] == "thumb" else None
-    owner_names = set(settings["owner-name"]) or None
     document = build_journal(
         photos, settings["gap-minutes"], settings["similarity"],
         settings["location-degrees"], settings["link"], Path(settings["library"]),
