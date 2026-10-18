@@ -15,7 +15,7 @@ from photosmeta import journal as j
 from photosmeta import build_record
 from photosmeta.writers import SqliteWriter
 
-from conftest import make_photo
+from conftest import make_photo, make_place
 
 CST = timezone(timedelta(hours=-6))
 TINY_PNG = base64.b64decode(
@@ -242,12 +242,15 @@ def test_name_from_gps_zero_disables():
 # --- location labels ------------------------------------------------------
 
 def test_location_label_variants():
+    home = j.Home(label="Home — Fairview, TN",
+                  addresses=("100 Example St",),
+                  places=("Fairview",))
     assert j.location_label(
-        photo("2024-01-01T10:00:00-06:00", place_address="100 Example St, Fairview, TX")
-    ) == j.HOME_LABEL
+        photo("2024-01-01T10:00:00-06:00",
+              place_address="100 Example St, Fairview, TN"), home) == home.label
     assert j.location_label(
-        photo("2024-01-01T10:00:00-06:00", place_name="Riverside, Texas, United States")
-    ) == j.HOME_LABEL
+        photo("2024-01-01T10:00:00-06:00",
+              place_name="Fairview, Tennessee, United States"), home) == home.label
     assert j.location_label(
         photo("2024-01-01T10:00:00-06:00", search_info={
             "venues": ["Delhi6 Indian Kitchen"], "city": "Bengaluru",
@@ -263,6 +266,15 @@ def test_location_label_variants():
             "city": "Paris", "state_abbreviation": ""})
     ) == "Paris"
     assert j.location_label(photo("2024-01-01T10:00:00-06:00")) == j.UNKNOWN
+
+
+def test_home_flags_default_to_plain_home():
+    assert j.location_label(
+        photo("2024-01-01T10:00:00-06:00", search_info={"home": "Home"})
+    ) == j.DEFAULT_HOME_LABEL
+    assert j.location_label(
+        photo("2024-01-01T10:00:00-06:00", place_address="100 Example St")
+    ) != j.DEFAULT_HOME_LABEL
 
 
 def test_location_label_prefers_specific_place_name_over_town():
@@ -436,7 +448,7 @@ def test_render_structure_and_grammar():
     assert "## 2024" in doc
     assert "### January 2024" in doc
     assert "#### Monday, January 1 · iPhone 13 Pro" in doc
-    assert "**Home — Fairview, TX**" in doc
+    assert "**Home**" in doc
     assert "*(1 photo; ★1)*" in doc
     assert "with Ava" in doc
     assert "*(1 video)*" in doc
@@ -607,7 +619,7 @@ def test_day_narrative_people_caption_describes_the_named_people():
                            "state_abbreviation": "TX"}),
     ])
     # The named people are the group in the photo, not companions of it.
-    assert "with Riley, Ava, and Emma, a group of people and children sitting at a table" in text
+    assert "with Ava, Emma, and Riley, a group of people and children sitting at a table" in text
     assert "taking photos of a group of people" not in text
 
 
@@ -828,3 +840,26 @@ def test_config_unknown_keys_warn(tmp_path, capsys):
 def test_config_flag_overrides_only_specified(tmp_path):
     args = build_journal.parse_args(["--gap-minutes", "30"])
     assert build_journal.flag_overrides(args) == {"gap-minutes": 30}
+
+
+def test_generate_config_includes_home_defaults(tmp_path):
+    path = tmp_path / "config.yaml"
+    build_journal.main(["--generate-config", str(path)])
+    data = yaml.safe_load(path.read_text())
+    assert data["home-label"] == "Home"
+    assert data["home-address"] == []
+    assert data["home-place"] == []
+
+
+def test_config_home_address_is_labeled(tmp_path):
+    records = [build_record(make_photo(
+        ai_caption="a cat", place=make_place(address="100 Example St")))]
+    sqlite_path = tmp_path / "photos.sqlite"
+    _write_sqlite(records, sqlite_path)
+    cfg = tmp_path / "c.yaml"
+    cfg.write_text(yaml.safe_dump({"home-label": "Casa",
+                                   "home-address": ["100 Example St"]}))
+    out = tmp_path / "j.md"
+    build_journal.main([str(sqlite_path), "--config", str(cfg),
+                        "--out", str(out), "--link", "none", "--quiet"])
+    assert "**Casa**" in out.read_text()

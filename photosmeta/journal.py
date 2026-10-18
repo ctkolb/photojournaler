@@ -30,8 +30,7 @@ from difflib import SequenceMatcher
 from pathlib import Path
 from typing import Iterable
 
-HOME_ADDR = "100 Example St"
-HOME_LABEL = "Home — Fairview, TX"
+DEFAULT_HOME_LABEL = "Home"
 UNKNOWN = "No location metadata"
 DEFAULT_GAP_MINUTES = 75
 DEFAULT_SIMILARITY = 0.5
@@ -44,6 +43,33 @@ LINK_MODES = ("thumb", "preview", "original", "photos", "none")
 
 _TIERS = (("Pro Max", 3), ("Pro", 2), ("Plus", 1))
 _MODEL_RE = re.compile(r"^iPhone\s+(\d+)\b")
+
+
+@dataclass(frozen=True)
+class Home:
+    """Where the journal owner lives, used to label home and gauge trips.
+
+    ``label`` is what the journal prints for a photo taken at home. Home is
+    recognized from Apple's own ``home`` flag plus, optionally, ``addresses``
+    (address prefixes) and ``places`` (place-name substrings). The defaults
+    identify nothing but what Apple tags as home, and print it as ``Home``.
+    """
+
+    label: str = DEFAULT_HOME_LABEL
+    addresses: tuple[str, ...] = ()
+    places: tuple[str, ...] = ()
+
+    def matches(self, photo: "Photo") -> bool:
+        if photo.search_info.get("home") == "Home":
+            return True
+        address = photo.place_address or ""
+        if any(prefix and address.startswith(prefix) for prefix in self.addresses):
+            return True
+        place = photo.place_name or ""
+        return any(fragment and fragment in place for fragment in self.places)
+
+
+DEFAULT_HOME = Home()
 
 
 @dataclass
@@ -243,19 +269,21 @@ def is_camera_photo(photo: Photo) -> bool:
     return True
 
 
-def _inherit_locations(photos: list[Photo], minutes: int) -> None:
+def _inherit_locations(photos: list[Photo], minutes: int,
+                       home: Home = DEFAULT_HOME) -> None:
     """Fill a missing location from the nearest-in-time located photo."""
     if minutes <= 0:
         return
     pool = sorted(
-        (p for p in photos if p.dt is not None and location_label(p) != UNKNOWN),
+        (p for p in photos if p.dt is not None
+         and location_label(p, home) != UNKNOWN),
         key=lambda p: p.dt,
     )
     if not pool:
         return
     times = [p.dt for p in pool]
     for photo in photos:
-        if photo.dt is None or photo.coord is not None or location_label(photo) != UNKNOWN:
+        if photo.dt is None or photo.coord is not None or location_label(photo, home) != UNKNOWN:
             continue
         i = bisect.bisect_left(times, photo.dt)
         best: tuple[float, Photo] | None = None
@@ -265,11 +293,12 @@ def _inherit_locations(photos: list[Photo], minutes: int) -> None:
                 if delta <= minutes * 60 and (best is None or delta < best[0]):
                     best = (delta, pool[j])
         if best is not None:
-            photo.inherited_location = location_label(best[1])
+            photo.inherited_location = location_label(best[1], home)
             photo.inherited_coord = best[1].coord
 
 
-def _name_from_gps(photos: list[Photo], km: float) -> None:
+def _name_from_gps(photos: list[Photo], km: float,
+                   home: Home = DEFAULT_HOME) -> None:
     """Name a GPS-only photo after the nearest located photo within ``km``.
 
     Keeps the photo's own coordinates; only borrows a place name. A grid keeps
@@ -277,8 +306,10 @@ def _name_from_gps(photos: list[Photo], km: float) -> None:
     """
     if km <= 0:
         return
-    labeled = [p for p in photos if p.coord is not None and location_label(p) != UNKNOWN]
-    targets = [p for p in photos if p.coord is not None and location_label(p) == UNKNOWN]
+    labeled = [p for p in photos if p.coord is not None
+               and location_label(p, home) != UNKNOWN]
+    targets = [p for p in photos if p.coord is not None
+               and location_label(p, home) == UNKNOWN]
     if not labeled or not targets:
         return
     cell = km / 111.0
@@ -297,7 +328,7 @@ def _name_from_gps(photos: list[Photo], km: float) -> None:
                     if distance <= km and (best is None or distance < best[0]):
                         best = (distance, other)
         if best is not None:
-            photo.inherited_location = location_label(best[1])
+            photo.inherited_location = location_label(best[1], home)
 
 
 def select_photos(
@@ -307,6 +338,7 @@ def select_photos(
     keep_noise: bool = False,
     inherit_minutes: int = DEFAULT_INHERIT_MINUTES,
     location_guess_km: float = DEFAULT_LOCATION_GUESS_KM,
+    home: Home = DEFAULT_HOME,
 ) -> list[Photo]:
     """Pick the photos to journalize.
 
@@ -335,8 +367,8 @@ def select_photos(
             for photo in photos
             if is_camera_photo(photo) and (keep_noise or not is_noise(photo))
         ]
-    _inherit_locations(eligible, inherit_minutes)
-    _name_from_gps(eligible, location_guess_km)
+    _inherit_locations(eligible, inherit_minutes, home)
+    _name_from_gps(eligible, location_guess_km, home)
 
     seen: set[tuple[str, str | None]] = set()
     deduped: list[Photo] = []
@@ -362,22 +394,20 @@ _ROAD = re.compile(
 )
 
 
-def location_label(photo: Photo) -> str:
+def location_label(photo: Photo, home: Home = DEFAULT_HOME) -> str:
     """Resolve a colloquial, as-specific-as-possible place for a photo.
 
     Prefers named venues, landmarks, areas of interest, bodies of water, and
     neighborhoods from Apple's reverse-geocoded place data, then the leading
     component of the place name (e.g. "Millennium Station"), and only then
-    falls back to the town.
+    falls back to the town. Photos taken at ``home`` are labeled with its
+    ``label``.
     """
-    address = photo.place_address or ""
-    place = photo.place_name or ""
     if photo.inherited_location:
         return photo.inherited_location
-    if address.startswith(HOME_ADDR) or photo.search_info.get("home") == "Home":
-        return HOME_LABEL
-    if "Riverside" in place or "Fairview" in place:
-        return HOME_LABEL
+    if home.matches(photo):
+        return home.label
+    place = photo.place_name or ""
     city = photo.search_info.get("city") or ""
     state = photo.search_info.get("state_abbreviation") or ""
     town = f"{city}, {state}" if city and state else (city or place)
@@ -504,6 +534,7 @@ def build_batches(
     gap_minutes: int = DEFAULT_GAP_MINUTES,
     location_degrees: float = DEFAULT_LOCATION_DEGREES,
     owner_name: set[str] | None = None,
+    home: Home = DEFAULT_HOME,
 ) -> list[Batch]:
     """Group consecutive photos at the same place.
 
@@ -519,7 +550,7 @@ def build_batches(
         dt = photo.dt
         if dt is None:
             continue
-        loc = location_label(photo)
+        loc = location_label(photo, home)
         coord = photo.coord
         if current is not None:
             gap = (dt - current.end).total_seconds() / 60
@@ -767,12 +798,13 @@ def _median_coord(entries: list[Entry]) -> tuple[float, float] | None:
     return (lats[len(lats) // 2], lons[len(lons) // 2])
 
 
-def home_coord(batches: Iterable[Batch]) -> tuple[float, float] | None:
+def home_coord(batches: Iterable[Batch],
+               home: Home = DEFAULT_HOME) -> tuple[float, float] | None:
     """Median coordinate of photos taken at home, used to gauge trip distance."""
     lats: list[float] = []
     lons: list[float] = []
     for batch in batches:
-        if batch.location != HOME_LABEL:
+        if batch.location != home.label:
             continue
         for entry in batch.entries:
             if entry.coord:
@@ -835,7 +867,8 @@ def _segment_activity(segment: dict) -> str | None:
     return _and_list(activities) if activities else None
 
 
-def day_narrative(day, items: list[tuple[Batch, list]], home=None, previous=None):
+def day_narrative(day, items: list[tuple[Batch, list]], home=None, previous=None,
+                  home_label: str = DEFAULT_HOME_LABEL):
     """A short, factual story of one day, grounded in the day's metadata.
 
     Interleaves where they were, who was there, and what they did, in order.
@@ -891,7 +924,7 @@ def day_narrative(day, items: list[tuple[Batch, list]], home=None, previous=None
     for index, segment in enumerate(segments[:max_stops]):
         time = _part_of_day(segment["start"])
         names = sorted({name for batch, _ in segment["items"] for name in batch.names})
-        where = "home" if segment["location"] == HOME_LABEL else segment["location"]
+        where = "home" if segment["location"] == home_label else segment["location"]
         caption = _segment_caption(segment)
         activity = _segment_activity(segment)
         clause = f"{time} they were at {where}"
@@ -960,7 +993,8 @@ def day_narrative(day, items: list[tuple[Batch, list]], home=None, previous=None
 def render(batches: list[Batch], windows: list[tuple[str, str]] | None = None,
            similarity: float = DEFAULT_SIMILARITY, link: str = "thumb",
            library: Path | None = None, thumb_dir: Path | None = None,
-           thumb_size: int = DEFAULT_THUMB_SIZE, narrative: bool = True) -> str:
+           thumb_size: int = DEFAULT_THUMB_SIZE, narrative: bool = True,
+           home: Home = DEFAULT_HOME) -> str:
     grouped = [(batch, cluster_entries(batch.entries, similarity)) for batch in batches]
     if link == "thumb":
         examples = (group[0] for _, clusters in grouped for _, group in clusters)
@@ -1003,7 +1037,7 @@ def render(batches: list[Batch], windows: list[tuple[str, str]] | None = None,
                 cameras.append(camera)
 
     current_year = current_month = None
-    home = home_coord(batches)
+    home_point = home_coord(batches, home)
     trip = TripState()
     for day, items in _day_groups(grouped):
         if day.year != current_year:
@@ -1015,7 +1049,7 @@ def render(batches: list[Batch], windows: list[tuple[str, str]] | None = None,
             lines += [f"### {day.strftime('%B %Y')}", ""]
         lines += [f"#### {day.strftime('%A, %B %-d')} · {', '.join(day_cameras[day])}", ""]
         if narrative:
-            text, trip = day_narrative(day, items, home, trip)
+            text, trip = day_narrative(day, items, home_point, trip, home.label)
             lines += [text, ""]
 
         current_location = None
@@ -1070,6 +1104,7 @@ def render_html(
     thumb_dir: Path | None = None,
     thumb_size: int = DEFAULT_THUMB_SIZE,
     narrative: bool = True,
+    home: Home = DEFAULT_HOME,
 ) -> str:
     """Render the journal as a standalone HTML page (browser-native)."""
     grouped = [(batch, cluster_entries(batch.entries, similarity)) for batch in batches]
@@ -1121,7 +1156,7 @@ def render_html(
             out.append("</ul>")
             open_list = False
 
-    home = home_coord(batches)
+    home_point = home_coord(batches, home)
     trip = TripState()
     for day, items in _day_groups(grouped):
         if day.year != current_year:
@@ -1137,7 +1172,7 @@ def render_html(
         cameras = html.escape(", ".join(day_cameras[day]))
         out.append(f"<h4>{html.escape(day.strftime('%A, %B %-d'))} · {cameras}</h4>")
         if narrative:
-            text, trip = day_narrative(day, items, home, trip)
+            text, trip = day_narrative(day, items, home_point, trip, home.label)
             out.append(f'<p class="narrative">{html.escape(text)}</p>')
 
         current_location = None
@@ -1189,16 +1224,17 @@ def build_journal(
     owner: bool = True,
     inherit_minutes: int = DEFAULT_INHERIT_MINUTES,
     location_guess_km: float = DEFAULT_LOCATION_GUESS_KM,
+    home: Home = DEFAULT_HOME,
 ) -> str:
     """Select the photos and render the full journal."""
     photos = list(photos)
     windows = infer_owner_windows(photos) if owner else []
     selected = select_photos(photos, windows, owner, keep_noise, inherit_minutes,
-                             location_guess_km)
-    batches = build_batches(selected, gap_minutes, location_degrees, owner_name)
+                             location_guess_km, home)
+    batches = build_batches(selected, gap_minutes, location_degrees, owner_name, home)
     renderer = render_html if html else render
     return renderer(batches, windows, similarity, link, library, thumb_dir,
-                    thumb_size, narrative)
+                    thumb_size, narrative, home)
 
 
 def read_photos(paths: Iterable[Path]) -> list[Photo]:

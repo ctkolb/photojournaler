@@ -22,6 +22,7 @@ import yaml
 
 from photosmeta.journal import (
     DEFAULT_GAP_MINUTES,
+    DEFAULT_HOME_LABEL,
     DEFAULT_LOCATION_GUESS_KM,
     DEFAULT_INHERIT_MINUTES,
     DEFAULT_LIBRARY,
@@ -29,6 +30,7 @@ from photosmeta.journal import (
     DEFAULT_SIMILARITY,
     DEFAULT_THUMB_SIZE,
     LINK_MODES,
+    Home,
     build_journal,
     format_owner_phones,
     infer_owner_windows,
@@ -54,6 +56,9 @@ CONFIG_KEYS: dict[str, str] = {
     "keep-junk": "keep_junk",
     "narrative": "narrative",
     "owner-name": "owner_name",
+    "home-label": "home_label",
+    "home-address": "home_address",
+    "home-place": "home_place",
     "quiet": "quiet",
 }
 
@@ -72,6 +77,9 @@ DEFAULTS: dict = {
     "keep-junk": False,
     "narrative": True,
     "owner-name": [],
+    "home-label": DEFAULT_HOME_LABEL,
+    "home-address": [],
+    "home-place": [],
     "quiet": False,
 }
 
@@ -129,6 +137,14 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
                         help="Write the per-day story (use --no-narrative to omit)")
     parser.add_argument("--owner-name", action="append", default=argparse.SUPPRESS,
                         help="Person name to omit from 'with ...' (repeatable)")
+    parser.add_argument("--home-label", default=argparse.SUPPRESS,
+                        help="Label printed for photos taken at home (default: Home)")
+    parser.add_argument("--home-address", action="append", default=argparse.SUPPRESS,
+                        help="Address prefix that marks a photo as taken at home "
+                             "(repeatable)")
+    parser.add_argument("--home-place", action="append", default=argparse.SUPPRESS,
+                        help="Place name that marks a photo as taken at home "
+                             "(repeatable)")
     parser.add_argument("--quiet", action=argparse.BooleanOptionalAction,
                         default=argparse.SUPPRESS,
                         help="Suppress summary output")
@@ -210,11 +226,17 @@ def main(argv: list[str] | None = None) -> int:
     keep_noise = settings["keep-junk"]
     narrative = settings["narrative"]
     quiet = settings["quiet"]
+    home = Home(
+        label=settings["home-label"],
+        addresses=tuple(settings["home-address"]),
+        places=tuple(settings["home-place"]),
+    )
 
     photos = read_photos(inputs)
     windows = infer_owner_windows(photos) if owner else []
     selected = select_photos(photos, windows, owner, keep_noise,
-                             settings["inherit-minutes"], settings["location-guess-km"])
+                             settings["inherit-minutes"], settings["location-guess-km"],
+                             home)
     out = Path(settings["out"])
     html = out.suffix.lower() in (".html", ".htm")
     thumb_dir = out.parent / "photos" if settings["link"] == "thumb" else None
@@ -224,6 +246,7 @@ def main(argv: list[str] | None = None) -> int:
         settings["location-degrees"], settings["link"], Path(settings["library"]),
         html, thumb_dir, settings["thumb-size"], keep_noise, narrative,
         owner_names, owner, settings["inherit-minutes"], settings["location-guess-km"],
+        home,
     )
 
     out.parent.mkdir(parents=True, exist_ok=True)
