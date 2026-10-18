@@ -256,7 +256,14 @@ macOS runner (required, since importing `osxphotos` needs macOS). The job is
 named **`test`**; that is the required status check enforced by branch
 protection (see [`docs/branch-protection.md`](docs/branch-protection.md)).
 
-## For contributors
+## Design principles
 
-See [`AGENTS.md`](AGENTS.md) for the repository layout, the journal pipeline
-internals, and conventions.
+- **AI-assisted development, disclosed.** Contributions written with AI help are
+  reviewed like any other and disclosed with an `Assisted-by:` commit trailer
+  (see [`CONTRIBUTING.md`](CONTRIBUTING.md)).
+
+## Contributing
+
+See [`CONTRIBUTING.md`](CONTRIBUTING.md) for how to contribute, including the
+`Assisted-by:` trailer for disclosing AI assistance. See [`AGENTS.md`](AGENTS.md)
+for the repository layout, the journal pipeline internals, and conventions.
