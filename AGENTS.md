@@ -32,6 +32,7 @@ python3 -m venv .venv
 | `export_photos_metadata.py` | CLI: Photos library → `out/photos.{json,csv,sqlite}` |
 | `analyze_photos_metadata.py` | CLI: export → console summary / HTML report |
 | `build_journal.py` | CLI: export(s) → `out/journal.md` |
+| `docs/roadmap.md` | Future improvement ideas (selected + AI-proposed) |
 | `tests/` | Hermetic pytest suite (duck-typed fakes; no real library) |
 | `out/` | Generated outputs (gitignored) |
 
