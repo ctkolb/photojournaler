@@ -35,6 +35,7 @@ python3 -m venv .venv
 | `docs/roadmap.md` | Future improvement ideas (selected + AI-proposed) |
 | `tests/` | Hermetic pytest suite (duck-typed fakes; no real library) |
 | `out/` | Generated outputs (gitignored) |
+| `LICENSE` | GNU GPL v3.0-or-later |
 
 ## Commands
 

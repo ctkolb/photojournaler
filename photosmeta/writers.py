@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 ctkolb
 """Streaming writers for JSON, CSV, and SQLite output."""
 
 from __future__ import annotations

@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 ctkolb
 """Build a markdown photo journal from exported Photos metadata.
 
 Reads one or more ``photos.sqlite`` (or ``photos.json``) exports produced by

@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 ctkolb
 """Flatten a nested metadata record into scalar columns and tables."""
 
 from __future__ import annotations

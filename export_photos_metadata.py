@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 ctkolb
 """Export metadata from a macOS Photos library to JSON, CSV, and SQLite.
 
 Reads the local Photos.sqlite database through osxphotos. No photos are

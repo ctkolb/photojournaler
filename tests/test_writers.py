@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 ctkolb
 """Tests for the JSON, CSV, and SQLite writers."""
 
 from __future__ import annotations

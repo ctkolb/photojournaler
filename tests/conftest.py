@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 ctkolb
 """Shared fixtures and duck-typed fakes for osxphotos objects.
 
 The fakes mirror only the attributes that ``photosmeta.extract`` reads, so the
