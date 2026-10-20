@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 ctkolb
 """Build a markdown photo journal from exported Photos metadata.
 
 The pipeline is deterministic and split into small, testable steps:

@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 ctkolb
 """Tests for photosmeta.extract.build_record."""
 
 from __future__ import annotations

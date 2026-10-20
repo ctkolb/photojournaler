@@ -267,3 +267,16 @@ protection (see [`docs/branch-protection.md`](docs/branch-protection.md)).
 See [`CONTRIBUTING.md`](CONTRIBUTING.md) for how to contribute, including the
 `Assisted-by:` trailer for disclosing AI assistance. See [`AGENTS.md`](AGENTS.md)
 for the repository layout, the journal pipeline internals, and conventions.
+
+## License
+
+Licensed under the **GNU General Public License, version 3 or later**
+(`GPL-3.0-or-later`). See [`LICENSE`](LICENSE) for the full text.
+
+You are free to use, study, share, and modify this software. If you
+distribute it, or a work based on it, you must pass on the same freedoms
+and make the corresponding source available under the same license.
+
+This program is distributed in the hope that it will be useful, but
+**without any warranty**; without even the implied warranty of
+merchantability or fitness for a particular purpose.

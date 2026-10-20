@@ -23,3 +23,17 @@ contributions are welcome, with two expectations:
 
 Keep commit messages concise and in the imperative mood. When AI assistance
 was used, append the `Assisted-by:` trailer described above.
+
+## License
+
+This project is licensed under the **GNU General Public License, version
+3 or later** (`GPL-3.0-or-later`) — see [`LICENSE`](LICENSE). By
+contributing, you agree that your contributions are licensed under the
+same terms.
+
+New source files should carry the SPDX header:
+
+```
+SPDX-License-Identifier: GPL-3.0-or-later
+Copyright (C) 2026 ctkolb
+```

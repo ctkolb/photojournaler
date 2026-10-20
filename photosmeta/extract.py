@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 ctkolb
 """Extract a complete metadata record from an osxphotos PhotoInfo object."""
 
 from __future__ import annotations

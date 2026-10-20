@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 ctkolb
 """End-to-end tests for the export CLI, with osxphotos.PhotosDB faked out."""
 
 from __future__ import annotations

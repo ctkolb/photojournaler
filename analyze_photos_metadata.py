@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 ctkolb
 """Analyze an exported Photos metadata set and print / render statistics.
 
 Reads either ``photos.sqlite`` or ``photos.json`` produced by

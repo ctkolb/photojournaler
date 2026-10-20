@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 ctkolb
 """Gather metadata from a local macOS Photos library (iCloud Photos)."""
 
 from .extract import build_record
