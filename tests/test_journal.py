@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 ctkolb
 """Tests for photosmeta.journal and the build_journal CLI."""
 
 from __future__ import annotations
@@ -437,7 +439,7 @@ def test_build_batches_distance_threshold_is_configurable():
 def test_render_structure_and_grammar():
     photos = [
         photo("2024-01-01T09:56:00-06:00", ai_caption="a child sleeping on a couch",
-              persons="Ava", favorite=True,
+              persons="Nora", favorite=True,
               search_info={"city": "Fairview", "home": "Home"}),
         photo("2024-01-03T19:22:00-06:00", ai_caption="a group of fish swimming",
               media_type="video"),
@@ -450,7 +452,7 @@ def test_render_structure_and_grammar():
     assert "#### Monday, January 1 · iPhone 13 Pro" in doc
     assert "**Home**" in doc
     assert "*(1 photo; ★1)*" in doc
-    assert "with Ava" in doc
+    assert "with Nora" in doc
     assert "*(1 video)*" in doc
     assert "1 photos" not in doc
 
@@ -600,12 +602,12 @@ def test_day_narrative_singular_no_location():
 def test_day_narrative_interleaves_where_who_what():
     text = _day_narrative_for([
         photo("2024-01-01T09:00:00-06:00", ai_caption="a cat",
-              persons="Ava", search_info={"home": "Home"}),
+              persons="Nora", search_info={"home": "Home"}),
         photo("2024-01-01T14:00:00-06:00", ai_caption="a museum",
               search_info={"venues": ["Some Museum"], "city": "Dallas",
                            "state_abbreviation": "TX"}),
     ])
-    assert "with Ava" in text
+    assert "with Nora" in text
     assert "Some Museum — Dallas, TX" in text
     assert "taking photos of a museum" in text
 
@@ -614,12 +616,12 @@ def test_day_narrative_people_caption_describes_the_named_people():
     text = _day_narrative_for([
         photo("2024-01-01T14:00:00-06:00",
               ai_caption="a group of people and children sitting at a table with bowls of food",
-              persons="Riley, Ava, Emma",
+              persons="Riley, Nora, Iris",
               search_info={"venues": ["Some Cafe"], "city": "Dallas",
                            "state_abbreviation": "TX"}),
     ])
     # The named people are the group in the photo, not companions of it.
-    assert "with Ava, Emma, and Riley, a group of people and children sitting at a table" in text
+    assert "with Iris, Nora, and Riley, a group of people and children sitting at a table" in text
     assert "taking photos of a group of people" not in text
 
 
