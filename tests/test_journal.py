@@ -865,3 +865,131 @@ def test_config_home_address_is_labeled(tmp_path):
     build_journal.main([str(sqlite_path), "--config", str(cfg),
                         "--out", str(out), "--link", "none", "--quiet"])
     assert "**Casa**" in out.read_text()
+
+
+# --- vault output ---------------------------------------------------------
+
+def summary(date, *, away=False, places=None, people=None, photos=1, videos=0,
+            favorites=0, activities=None, holidays=None, timezones=None,
+            cities=None, country_codes=None, route_bits=None, airport=False,
+            device=None):
+    return j.DaySummary(
+        day=datetime.fromisoformat(date),
+        device=device or ["iPhone 13 Pro"],
+        away=away,
+        places=places or [("Somewhere — TX", None)],
+        people=people or [],
+        photos=photos,
+        videos=videos,
+        favorites=favorites,
+        activities=activities or [],
+        holidays=holidays or [],
+        timezones=timezones or [],
+        cities=cities or [],
+        country_codes=country_codes or [],
+        route_bits=route_bits or [],
+        airport=airport,
+    )
+
+
+def test_slugify_and_tz_label():
+    assert j._slugify("CA Val d'Europe") == "ca-val-d-europe"
+    assert j._tz_label("GMT-0600") == "UTC-06:00"
+    assert j._tz_label("GMT+0530") == "UTC+05:30"
+    assert j._tz_label("America/Chicago") == "America/Chicago"
+
+
+def test_is_airport_detects_venue_type_and_name():
+    assert j._is_airport({"venue_types": ["Airport"]})
+    assert j._is_airport({"venue_types": ["Airport Terminal"]})
+    assert j._is_airport({"venues": ["Dallas/Fort Worth International Airport"]})
+    assert not j._is_airport({"venue_types": ["Museum"], "venues": ["The Met"]})
+
+
+def test_segment_trips_groups_contiguous_away_days():
+    days = [
+        summary("2024-06-01T10:00:00", away=True, cities=["Chicago"],
+                country_codes=["US"], route_bits=["Chicago, US"]),
+        summary("2024-06-02T10:00:00", away=True, cities=["Chicago"],
+                country_codes=["US"], route_bits=["Chicago, US"]),
+        summary("2024-06-10T10:00:00", away=False),
+        summary("2024-07-01T10:00:00", away=True, cities=["Paris"],
+                country_codes=["FR"], route_bits=["Paris, FR"]),
+        summary("2024-07-02T10:00:00", away=True, cities=["Paris"],
+                country_codes=["FR"], route_bits=["Paris, FR"]),
+        summary("2024-07-03T10:00:00", away=True, cities=["Paris"],
+                country_codes=["FR"], route_bits=["Paris, FR"]),
+    ]
+    trips = j.segment_trips(days)
+    assert len(trips) == 2
+    assert trips[0].day_count == 2 and trips[0].route == "Chicago, US"
+    assert trips[1].day_count == 3 and "Paris, FR" in trips[1].route
+    assert "chicago-2024" in trips[0].slug
+
+
+def test_segment_trips_single_day_qualifies_with_airport():
+    days = [summary("2024-06-01T10:00:00", away=False, airport=True,
+                    cities=["Dallas"], country_codes=["US"],
+                    route_bits=["Dallas, US"])]
+    assert len(j.segment_trips(days)) == 1
+    # A single day that is neither away nor airport/foreign is dropped.
+    assert j.segment_trips([summary("2024-06-01T10:00:00", away=False)]) == []
+
+
+def test_day_index_line_has_inline_fields():
+    line = j._day_index_line(
+        summary("2026-04-11T10:00:00", away=True, people=["Casey"], photos=41,
+                videos=6, favorites=2, timezones=["GMT+0200"],
+                places=[("16th Arr. — Paris", (48.8566, 2.3522))]),
+        "prague-paris-2026",
+    )
+    assert line.startswith("- date:: 2026-04-11")
+    assert "weekday:: Saturday" in line
+    assert "trip:: prague-paris-2026" in line
+    assert "away:: true" in line
+    assert "places:: 16th Arr. — Paris (48.8566, 2.3522)" in line
+    assert "people:: Casey" in line
+    assert "photos:: 41" in line and "videos:: 6" in line and "favorites:: 2" in line
+    assert "tz:: UTC+02:00" in line
+
+
+def test_render_vault_splits_by_year_and_lists_trips():
+    photos = [
+        photo("2024-06-01T10:00:00-05:00", ai_caption="a beach",
+              search_info={"city": "Chicago", "state_abbreviation": "IL"},
+              latitude=41.88, longitude=-87.63),
+        photo("2024-06-02T10:00:00-05:00", ai_caption="a beach",
+              search_info={"city": "Chicago", "state_abbreviation": "IL"},
+              latitude=41.88, longitude=-87.63),
+        photo("2024-08-01T10:00:00-05:00", ai_caption="a park",
+              search_info={"city": "Fairview", "home": "Home"},
+              latitude=33.10, longitude=-97.13),
+    ]
+    batches = j.build_batches(photos)
+    files = j.render_vault(batches, [])
+    assert set(files) == {j.Path("2024.md"), j.Path("trips.md")}
+    year = files[j.Path("2024.md")]
+    assert year.startswith("# Photo Journal — 2024")
+    assert "## Day index" in year and "## Entries" in year
+    assert "date:: 2024-06-01" in year
+    assert "away:: true" in year
+    trips = files[j.Path("trips.md")]
+    assert "chicago-2024" in trips and "route:: Chicago" in trips
+
+
+def test_render_vault_link_none_has_no_photo_links():
+    photos = [photo("2024-01-01T10:00:00-06:00", ai_caption="a cat",
+                    search_info={"city": "Fairview", "home": "Home"})]
+    batches = j.build_batches(photos)
+    files = j.render_vault(batches, [])
+    text = "".join(files.values())
+    assert "photos/" not in text and "photos://" not in text
+
+
+def test_build_vault_defaults_to_no_links_and_no_narrative():
+    photos = [photo("2024-01-01T10:00:00-06:00", ai_caption="a cat",
+                    search_info={"city": "Fairview", "home": "Home"})]
+    files = j.build_vault(photos)
+    text = "".join(files.values())
+    assert "photos/" not in text
+    assert "On Monday, January 1" not in text

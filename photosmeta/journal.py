@@ -41,10 +41,28 @@ DEFAULT_LIBRARY = Path.home() / "Pictures" / "Photos Library.photoslibrary"
 DEFAULT_THUMB_SIZE = 400
 DEFAULT_INHERIT_MINUTES = 5
 DEFAULT_LOCATION_GUESS_KM = 0.1
+DEFAULT_LINK = "none"
+DEFAULT_NARRATIVE = False
+DEFAULT_VAULT_DIR = "out/vault"
+HOME_COUNTRY = "US"
 LINK_MODES = ("thumb", "preview", "original", "photos", "none")
+
+_AIRPORT_VENUE_TYPES = frozenset(
+    {"Airport", "International Airport", "Airport Terminal"}
+)
 
 _TIERS = (("Pro Max", 3), ("Pro", 2), ("Plus", 1))
 _MODEL_RE = re.compile(r"^iPhone\s+(\d+)\b")
+
+
+def _is_airport(search_info: dict) -> bool:
+    """True when Apple's scene data tags the shot at an airport or terminal."""
+    if set(search_info.get("venue_types") or []) & _AIRPORT_VENUE_TYPES:
+        return True
+    return any(
+        "airport" in (venue or "").lower()
+        for venue in search_info.get("venues") or []
+    )
 
 
 @dataclass(frozen=True)
@@ -95,6 +113,8 @@ class Photo:
     search_info: dict = field(default_factory=dict)
     inherited_location: str | None = None
     inherited_coord: tuple[float, float] | None = None
+    tzname: str | None = None
+    country_code: str | None = None
 
     @property
     def dt(self) -> datetime | None:
@@ -127,6 +147,8 @@ class Photo:
             uuid=row["uuid"],
             filename=row["filename"],
             search_info=json.loads(search_info) if search_info else {},
+            tzname=row["tzname"],
+            country_code=row["place_country_code"],
         )
 
     @classmethod
@@ -151,6 +173,8 @@ class Photo:
             uuid=record.get("uuid"),
             filename=record.get("filename"),
             search_info=ml.get("search_info") or {},
+            tzname=record.get("tzname"),
+            country_code=place.get("country_code"),
         )
 
 
@@ -166,6 +190,10 @@ class Entry:
     filename: str | None = None
     latitude: float | None = None
     longitude: float | None = None
+    tzname: str | None = None
+    country_code: str | None = None
+    city: str | None = None
+    airport: bool = False
 
     @property
     def coord(self) -> tuple[float, float] | None:
@@ -528,6 +556,10 @@ def _entry(photo: Photo, dt: datetime) -> Entry:
         filename=photo.filename,
         latitude=photo.latitude,
         longitude=photo.longitude,
+        tzname=photo.tzname,
+        country_code=photo.country_code,
+        city=(photo.search_info.get("city") or None),
+        airport=_is_airport(photo.search_info),
     )
 
 
@@ -992,10 +1024,419 @@ def day_narrative(day, items: list[tuple[Batch, list]], home=None, previous=None
     return " ".join(sentences), state
 
 
+_SLUG_RE = re.compile(r"[^a-z0-9]+")
+_GMT_RE = re.compile(r"^GMT([+-])(\d{2})(\d{2})$")
+
+
+def _slugify(text: str) -> str:
+    return _SLUG_RE.sub("-", text.lower()).strip("-")
+
+
+def _tz_label(tzname: str) -> str:
+    """Turn Apple's ``GMT-0600`` into ``UTC-06:00`` (pass through unknowns)."""
+    match = _GMT_RE.match(tzname or "")
+    if not match:
+        return tzname
+    sign, hours, minutes = match.groups()
+    return f"UTC{sign}{hours}:{minutes}"
+
+
+def _place_with_coord(location: str, coord: tuple[float, float] | None) -> str:
+    if coord:
+        return f"{location} ({coord[0]:.4f}, {coord[1]:.4f})"
+    return location
+
+
+def _day_anchor(segments: list[dict],
+                home_point: tuple[float, float] | None,
+                ) -> tuple[bool, tuple[float, float] | None, str | None]:
+    """The day's farthest-from-home place, and whether that counts as away."""
+    anchor = None
+    for segment in segments:
+        distance = 0.0
+        if segment["coord"] and home_point:
+            distance = _distance_degrees(segment["coord"], home_point)
+        if anchor is None or distance > anchor[0]:
+            anchor = (distance, segment["coord"], segment["location"])
+    distance = anchor[0] if anchor else 0.0
+    away = bool(home_point and anchor and anchor[1] and distance > TRIP_DEGREES)
+    return away, (anchor[1] if anchor else None), (anchor[2] if anchor else None)
+
+
+@dataclass
+class DaySummary:
+    """Everything the vault needs about one day, gathered once."""
+
+    day: datetime
+    device: list[str]
+    away: bool
+    places: list[tuple[str, tuple[float, float] | None]]
+    people: list[str]
+    photos: int
+    videos: int
+    favorites: int
+    activities: list[str]
+    holidays: list[str]
+    timezones: list[str]
+    cities: list[str]
+    country_codes: list[str]
+    route_bits: list[str]
+    airport: bool
+
+    @property
+    def iso(self) -> str:
+        return self.day.strftime("%Y-%m-%d")
+
+    @property
+    def foreign(self) -> bool:
+        return any(code and code != HOME_COUNTRY for code in self.country_codes)
+
+
+def _summarize_day(day, items: list[tuple[Batch, list]],
+                   home_point: tuple[float, float] | None,
+                   home: Home) -> DaySummary:
+    segments = _segments(items)
+    away, _anchor, _place = _day_anchor(segments, home_point)
+    device: list[str] = []
+    timezones: list[str] = []
+    cities: list[str] = []
+    country_codes: list[str] = []
+    route_bits: list[str] = []
+    airport = False
+    photos = videos = favorites = 0
+    for batch, _ in items:
+        for entry in batch.entries:
+            if entry.camera and entry.camera not in device:
+                device.append(entry.camera)
+            if entry.tzname and entry.tzname not in timezones:
+                timezones.append(entry.tzname)
+            if entry.city and entry.city not in cities:
+                cities.append(entry.city)
+            if entry.country_code and entry.country_code not in country_codes:
+                country_codes.append(entry.country_code)
+            if entry.city:
+                bit = f"{entry.city}, {entry.country_code}" \
+                    if entry.country_code else entry.city
+                if bit not in route_bits:
+                    route_bits.append(bit)
+            airport = airport or entry.airport
+            photos += 1
+            videos += entry.video
+            favorites += entry.favorite
+    places = [(segment["location"], segment["coord"]) for segment in segments]
+    if not places:
+        places = [(UNKNOWN, None)]
+    return DaySummary(
+        day=day,
+        device=device,
+        away=away,
+        places=places,
+        people=sorted({name for batch, _ in items for name in batch.names}),
+        photos=photos,
+        videos=videos,
+        favorites=favorites,
+        activities=sorted({a for batch, _ in items for a in batch.activities}),
+        holidays=sorted({h for batch, _ in items for h in batch.holidays}),
+        timezones=timezones,
+        cities=cities,
+        country_codes=country_codes,
+        route_bits=route_bits,
+        airport=airport,
+    )
+
+
+def summarize_days(day_items: list[tuple],
+                   home_point: tuple[float, float] | None,
+                   home: Home = DEFAULT_HOME) -> list[DaySummary]:
+    """Reduce each day's batches to a :class:`DaySummary`."""
+    return [
+        _summarize_day(day, items, home_point, home)
+        for day, items in day_items
+    ]
+
+
+@dataclass
+class Trip:
+    """A contiguous run of days away from home (or touching an airport/abroad)."""
+
+    slug: str
+    start: datetime
+    end: datetime
+    day_count: int
+    route: str
+    people: list[str]
+    photos: int
+    videos: int
+    days: list[DaySummary]
+
+
+def _trip_slug(names: list[str], start, end) -> str:
+    base = "-".join(dict.fromkeys(_slugify(n) for n in names if n)) or "trip"
+    years = f"{start.year}" if start.year == end.year else f"{start.year}-{end.year}"
+    return f"{base}-{years}"
+
+
+def _make_trip(days: list[DaySummary]) -> Trip:
+    cities: list[str] = []
+    countries: list[str] = []
+    route_bits: list[str] = []
+    for day in days:
+        for city in day.cities:
+            if city not in cities:
+                cities.append(city)
+        for bit in day.route_bits:
+            if bit not in route_bits:
+                route_bits.append(bit)
+        for code in day.country_codes:
+            if code and code not in countries:
+                countries.append(code)
+    return Trip(
+        slug=_trip_slug(cities or countries, days[0].day, days[-1].day),
+        start=days[0].day,
+        end=days[-1].day,
+        day_count=len(days),
+        route=" → ".join(route_bits) or " → ".join(countries),
+        people=sorted({name for day in days for name in day.people}),
+        photos=sum(day.photos for day in days),
+        videos=sum(day.videos for day in days),
+        days=days,
+    )
+
+
+def segment_trips(summaries: list[DaySummary]) -> list[Trip]:
+    """Group away-from-home days into trips.
+
+    A trip is a run of consecutive calendar days that are away from home or
+    touch an airport or a foreign country. It qualifies when it spans at least
+    two days or includes an airport/abroad day (so a single day trip that stays
+    near home is dropped).
+    """
+    runs: list[list[DaySummary]] = []
+    current: list[DaySummary] = []
+    previous_date = None
+    for summary in summaries:
+        on_trip = summary.away or summary.airport or summary.foreign
+        if on_trip and current and previous_date is not None and \
+                (summary.day - previous_date).days > 1:
+            runs.append(current)
+            current = []
+        if on_trip:
+            current.append(summary)
+        elif current:
+            runs.append(current)
+            current = []
+        previous_date = summary.day
+    if current:
+        runs.append(current)
+    return [
+        _make_trip(days)
+        for days in runs
+        if len(days) >= 2 or any(day.airport or day.foreign for day in days)
+    ]
+
+
+def _day_index_line(summary: DaySummary, trip_slug: str | None) -> str:
+    first = [
+        f"date:: {summary.iso}",
+        f"weekday:: {summary.day.strftime('%A')}",
+        f"device:: {', '.join(summary.device) or 'unknown'}",
+    ]
+    if trip_slug:
+        first.append(f"trip:: {trip_slug}")
+    first.append(f"away:: {'true' if summary.away else 'false'}")
+    second = [
+        "places:: " + "; ".join(
+            _place_with_coord(location, coord)
+            for location, coord in summary.places
+        )
+    ]
+    if summary.people:
+        second.append(f"people:: {', '.join(summary.people)}")
+    second.append(f"photos:: {summary.photos}")
+    second.append(f"videos:: {summary.videos}")
+    second.append(f"favorites:: {summary.favorites}")
+    if summary.activities:
+        second.append(f"activities:: {', '.join(summary.activities)}")
+    if summary.holidays:
+        second.append(f"holidays:: {', '.join(summary.holidays)}")
+    if summary.timezones:
+        second.append(f"tz:: {'; '.join(_tz_label(t) for t in summary.timezones)}")
+    return f"- {' · '.join(first)}\n  {' · '.join(second)}"
+
+
+def _render_trips(trips: list[Trip]) -> str:
+    lines = ["# Trips", ""]
+    if not trips:
+        lines += ["_No qualifying trips._", ""]
+        return "\n".join(lines)
+    for trip in trips:
+        lines += [
+            f"## {trip.slug}",
+            "",
+            f"- start:: {trip.start:%Y-%m-%d}",
+            f"- end:: {trip.end:%Y-%m-%d}",
+            f"- days:: {trip.day_count}",
+            f"- route:: {trip.route}",
+        ]
+        if trip.people:
+            lines.append(f"- people:: {', '.join(trip.people)}")
+        lines += [
+            f"- photos:: {trip.photos}",
+            f"- videos:: {trip.videos}",
+            "",
+        ]
+    return "\n".join(lines)
+
+
+def _render_year(year: int, pairs: list[tuple],
+                 windows: list[tuple[str, str]] | None, trip_slug: dict,
+                 link: str, library: Path | None, thumb_dir: Path | None,
+                 thumb_size: int, narrative: bool, home: Home,
+                 home_point: tuple[float, float] | None) -> str:
+    """One year's Obsidian note: a day index followed by the day entries."""
+    lines = [f"# Photo Journal — {year}", ""]
+    if pairs:
+        first = pairs[0][0].day
+        last = pairs[-1][0].day
+        count = sum(summary.photos for summary, _ in pairs)
+        lines += [
+            f"**{count:,} photos · {first:%b %-d} – {last:%b %-d, %Y}**",
+            "",
+        ]
+    scope = ("The owner's camera photos only, in capture order." if windows
+             else "Camera photos from every device, in capture order.")
+    owner_line = (
+        "Owner's phone (inferred from the dominant-iPhone progression): "
+        f"{format_owner_phones(windows)}." if windows
+        else "Owner-phone detection is off."
+    )
+    lines += [
+        scope,
+        "",
+        owner_line,
+        "",
+        "Screenshots, screen recordings, saved/shared images, and low-value "
+        "shots are excluded. Locations are colloquial names from reverse-geocoded "
+        "place data; descriptions come from Apple's on-device ML captions, labels, "
+        "and OCR. **★** marks a favorite. Inline `key:: value` fields are for "
+        "Dataview.",
+        "",
+        "## Day index",
+        "",
+    ]
+    for summary, _ in pairs:
+        lines.append(_day_index_line(summary, trip_slug.get(summary.day)))
+    lines += ["", "## Entries", ""]
+
+    current_month = None
+    trip = TripState()
+    for summary, items in pairs:
+        day = summary.day
+        if day.month != current_month:
+            current_month = day.month
+            lines += [f"## {day.strftime('%B %Y')}", ""]
+        device = ", ".join(summary.device)
+        lines += [f"### {summary.iso} · {day.strftime('%A, %B %-d')} · {device}", ""]
+        if narrative:
+            text, trip = day_narrative(day, items, home_point, trip, home.label)
+            lines += [text, ""]
+
+        current_location = None
+        for batch, clusters in items:
+            if batch.location != current_location:
+                current_location = batch.location
+                lines += [f"**{current_location}**"]
+            tags = _tag_suffix(batch)
+            for index, (caption, group) in enumerate(clusters):
+                count = len(group)
+                favorites = sum(entry.favorite for entry in group)
+                video = any(entry.video for entry in group)
+                label = count_note(count, video)
+                if favorites:
+                    label += f"; ★{favorites}"
+                url = photo_url(group[0], link, library, thumb_dir, thumb_size)
+                marker = f"[{label}]({url})" if url else f"*({label})*"
+                text = sentence(caption) if caption else ""
+                bullet = f"- {_fmt_range(group)} — " + (f"{text} " if text else "")
+                bullet += marker
+                if tags and index == 0:
+                    bullet += f" — {tags}"
+                lines.append(bullet)
+    lines.append("")
+    return "\n".join(lines)
+
+
+def render_vault(batches: list[Batch], windows: list[tuple[str, str]] | None = None,
+                 similarity: float = DEFAULT_SIMILARITY, link: str = DEFAULT_LINK,
+                 library: Path | None = None, thumb_dir: Path | None = None,
+                 thumb_size: int = DEFAULT_THUMB_SIZE,
+                 narrative: bool = DEFAULT_NARRATIVE,
+                 home: Home = DEFAULT_HOME) -> dict[Path, str]:
+    """Render per-year notes plus ``trips.md`` for an Obsidian vault.
+
+    Returns a mapping of vault-relative path to file contents, e.g.
+    ``{Path("2019.md"): "...", Path("trips.md"): "..."}``.
+    """
+    grouped = [(batch, cluster_entries(batch.entries, similarity)) for batch in batches]
+    if link == "thumb":
+        examples = (group[0] for _, clusters in grouped for _, group in clusters)
+        _materialize_thumbs(examples, library, thumb_dir, thumb_size)
+    day_items = list(_day_groups(grouped))
+    home_point = home_coord(batches, home)
+    summaries = summarize_days(day_items, home_point, home)
+    trips = segment_trips(summaries)
+    trip_slug: dict = {}
+    for trip in trips:
+        for day in trip.days:
+            trip_slug[day.day] = trip.slug
+
+    files: dict[Path, str] = {}
+    years = sorted({day.year for day, _ in day_items})
+    for year in years:
+        pairs = [
+            (summary, items)
+            for summary, (day, items) in zip(summaries, day_items)
+            if day.year == year
+        ]
+        files[Path(f"{year}.md")] = _render_year(
+            year, pairs, windows, trip_slug, link, library, thumb_dir,
+            thumb_size, narrative, home, home_point,
+        )
+    files[Path("trips.md")] = _render_trips(trips)
+    return files
+
+
+def build_vault(
+    photos: Iterable[Photo],
+    gap_minutes: int = DEFAULT_GAP_MINUTES,
+    similarity: float = DEFAULT_SIMILARITY,
+    location_degrees: float = DEFAULT_LOCATION_DEGREES,
+    link: str = DEFAULT_LINK,
+    library: Path | None = DEFAULT_LIBRARY,
+    thumb_dir: Path | None = None,
+    thumb_size: int = DEFAULT_THUMB_SIZE,
+    keep_noise: bool = False,
+    narrative: bool = DEFAULT_NARRATIVE,
+    owner_name: set[str] | None = None,
+    owner: bool = True,
+    inherit_minutes: int = DEFAULT_INHERIT_MINUTES,
+    location_guess_km: float = DEFAULT_LOCATION_GUESS_KM,
+    home: Home = DEFAULT_HOME,
+) -> dict[Path, str]:
+    """Select the photos and render the vault files (see :func:`render_vault`)."""
+    photos = list(photos)
+    windows = infer_owner_windows(photos) if owner else []
+    selected = select_photos(photos, windows, owner, keep_noise, inherit_minutes,
+                             location_guess_km, home)
+    batches = build_batches(selected, gap_minutes, location_degrees, owner_name, home)
+    return render_vault(batches, windows, similarity, link, library, thumb_dir,
+                        thumb_size, narrative, home)
+
+
 def render(batches: list[Batch], windows: list[tuple[str, str]] | None = None,
-           similarity: float = DEFAULT_SIMILARITY, link: str = "thumb",
+           similarity: float = DEFAULT_SIMILARITY, link: str = DEFAULT_LINK,
            library: Path | None = None, thumb_dir: Path | None = None,
-           thumb_size: int = DEFAULT_THUMB_SIZE, narrative: bool = True,
+           thumb_size: int = DEFAULT_THUMB_SIZE, narrative: bool = DEFAULT_NARRATIVE,
            home: Home = DEFAULT_HOME) -> str:
     grouped = [(batch, cluster_entries(batch.entries, similarity)) for batch in batches]
     if link == "thumb":
@@ -1254,7 +1695,8 @@ def read_photos(paths: Iterable[Path]) -> list[Photo]:
             rows = con.execute(
                 "SELECT uuid, filename, date_original, camera_model, screenshot, "
                 "place_name, place_address, latitude, longitude, ai_caption, labels, "
-                "persons, favorite, media_type, search_info FROM photos"
+                "persons, favorite, media_type, search_info, tzname, "
+                "place_country_code FROM photos"
             ).fetchall()
         finally:
             con.close()
