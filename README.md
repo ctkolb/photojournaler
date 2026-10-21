@@ -270,6 +270,16 @@ it never leaks — see [`AGENTS.md`](AGENTS.md#keeping-personal-data-out-of-git)
 
 ## Design principles
 
+- **Application vs. content.** The repo holds the app; real exports, journals,
+  and locations are content and are never tracked. `photosmeta/leaks.py` — run by
+  the pre-commit/pre-push hooks and CI — fails the build if data files,
+  denylisted terms, machine paths, or secrets would be committed.
+- **Identity-free app.** The code and committed docs never hardcode a person's
+  name, home address, or machine path. Owner-specific values live in a gitignored
+  config or a denylist kept outside the repository.
+- **Deterministic seam.** The pipeline is plain, tested code — reproducible from
+  the same metadata. Descriptions come only from Apple's on-device ML
+  (`ai_caption`, labels, OCR); the journal never invents or editorializes.
 - **AI-assisted development, disclosed.** Contributions written with AI help are
   reviewed like any other and disclosed with an `Assisted-by:` commit trailer
   (see [`CONTRIBUTING.md`](CONTRIBUTING.md)).
