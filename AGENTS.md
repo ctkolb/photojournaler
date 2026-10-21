@@ -160,8 +160,10 @@ layers guard that:
   `python -m photosmeta.leaks --staged` (or `--all`); generate hashes with
   `python -m photosmeta.leaks --hash TERM`.
 - **`.githooks/pre-commit`** runs the guard and [gitleaks](https://github.com/gitleaks/gitleaks)
-  on staged files. Enable it once with `git config core.hooksPath .githooks`.
-  CI runs the same guard on every tracked file and a gitleaks secret scan.
+  on staged files. **`.githooks/pre-push`** mirrors CI: the test suite, the
+  guard over every tracked file (`--all`), and a gitleaks secret scan before
+  anything leaves the machine. Enable both once with
+  `git config core.hooksPath .githooks`.
 
 ## Conventions
 

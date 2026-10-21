@@ -259,8 +259,10 @@ protection (see [`docs/branch-protection.md`](docs/branch-protection.md)).
 Two more jobs keep personal data out of the repository: **`personal-data-guard`**
 refuses data files (`*.sqlite`, `*.json`, `*.csv`, `*.jpg`, `*.heic`, …) outside
 `tests/fixtures/` and any denylisted term, and **`secret-scan`** runs
-[gitleaks](https://github.com/gitleaks/gitleaks). The same guard runs locally in
-`.githooks/pre-commit`; enable it once with
+[gitleaks](https://github.com/gitleaks/gitleaks). `.githooks/pre-commit` runs
+the guard and gitleaks on staged files; `.githooks/pre-push` mirrors CI before
+anything leaves the machine (the test suite, the guard over every tracked file,
+and a gitleaks scan). Enable both once with
 `git config core.hooksPath .githooks`. The denylist lives outside the repo, so
 it never leaks — see [`AGENTS.md`](AGENTS.md#keeping-personal-data-out-of-git).
 

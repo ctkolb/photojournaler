@@ -1,0 +1,33 @@
+#!/bin/sh
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 ctkolb
+#
+# Pre-push guard mirroring CI: run the test suite, the personal-data guard over
+# every tracked file, and a gitleaks secret scan before anything leaves the
+# machine. Enable the hooks with:
+#
+#   git config core.hooksPath .githooks
+
+set -eu
+
+root="$(git rev-parse --show-toplevel)"
+cd "$root"
+
+python="python3"
+if [ -x ".venv/bin/python" ]; then
+    python=".venv/bin/python"
+fi
+
+echo "pre-push: running tests..." >&2
+"$python" -m pytest
+
+echo "pre-push: checking tracked files for personal data..." >&2
+"$python" -m photosmeta.leaks --all
+
+if command -v gitleaks >/dev/null 2>&1; then
+    echo "pre-push: scanning for secrets..." >&2
+    gitleaks git --redact --no-banner ||
+        gitleaks detect --redact --no-banner
+else
+    echo "gitleaks not installed; skipping the secret scan." >&2
+fi
