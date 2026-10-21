@@ -28,7 +28,33 @@ python3 -m venv .venv
 
 # …or a self-contained page you can open in a browser
 .venv/bin/python build_journal.py --out out/journal.html
+
+# …or per-year Obsidian notes (a day index + a trip index)
+.venv/bin/python build_journal.py --vault
 ```
+
+## Vault output
+
+`--vault` writes a set of Obsidian-friendly notes into `out/vault/` instead of a
+single file:
+
+- **`<year>.md`** per year — each opens with a compact **day index** of inline
+  Dataview fields, one entry per day, followed by the day-by-day entries:
+
+  ```markdown
+  - date:: 2026-04-11 · weekday:: Saturday · device:: iPhone 16 Pro · trip:: prague-paris-2026 · away:: true
+    places:: 16th Arr. — Paris (48.8566, 2.3522); Eiffel Tower — Paris (48.8584, 2.2945) · people:: Casey · photos:: 41 · videos:: 6 · favorites:: 2 · tz:: UTC+02:00
+  ```
+
+  Fields: ISO `date`, `weekday`, `device`, `trip` (slug), `away` (far from home),
+  `places` (colloquial name + coordinates), `people`, `photos`, `videos`,
+  `favorites`, `activities`, `holidays`, and `tz` (the day's timezone(s)).
+- **`trips.md`** — the trip index: each contiguous away-from-home span (at least
+  two days, or any day touching an airport or a foreign country) with its start,
+  end, day count, ordered route, people, and photo/video totals.
+
+Vault mode defaults to `--link none` and `--no-narrative`, so counts are plain
+and the prose is omitted (the day index carries the summary).
 
 ## What the journal looks like
 
@@ -110,10 +136,10 @@ Descriptions come only from Apple's on-device ML (`ai_caption`, labels, OCR).
 
 ### The daily narrative
 
-Each day opens with a story told like you'd tell a friend: where you were, who
-you were with, and what you did — in order. It is built *only* from that day's
-metadata (places and times, people/pets, activities and holidays, and the day's
-most common captions), so nothing is made up.
+When enabled, each day opens with a story told like you'd tell a friend: where
+you were, who you were with, and what you did — in order. It is built *only*
+from that day's metadata (places and times, people/pets, activities and
+holidays, and the day's most common captions), so nothing is made up.
 
 - **Farther from home ⇒ longer story.** Distance is measured from your home
   coordinate, so a day trip or vacation gets more detail than a day around the
@@ -122,19 +148,21 @@ most common captions), so nothing is made up.
   each other read as one trip (`they set out for …` → `the trip continued
   around …` → `they were back home`).
 
-Disable it with `--no-narrative`. Pass `--owner-name "Your Name"` to keep your
-own name out of the `with …` lists.
+The narrative is **off by default** (vault mode omits it in favor of the day
+index). Turn it on with `--narrative`. Pass `--owner-name "Your Name"` to keep
+your own name out of the `with …` lists.
 
 ### Opening a photo
 
-Each count links to one example photo from that line. By default (`--link
-thumb`) a small preview is copied into `out/photos/`, next to the journal, and
-linked **relatively** — `photos/<uuid>.jpg` — which works in VS Code's Markdown
-preview and in a browser. Other modes: `photos` opens the Photos app
-(`photos://asset?identifier=<uuid>`); `preview`/`original` link the file inside
-the library with `file://` (some viewers won't clickify these, and macOS privacy
-protection blocks the browser from reading `~/Pictures`); `none` leaves plain
-counts. Anything without a local file falls back to the `photos` scheme.
+Each count can link to one example photo from that line. The default is `none`
+(plain counts), which is what an Obsidian vault wants — `--link thumb` instead
+copies a small preview into `out/photos/` and links it **relatively**
+(`photos/<uuid>.jpg`), which works in VS Code's Markdown preview and in a
+browser but breaks in a vault that has no such folder. Other modes: `photos`
+opens the Photos app (`photos://asset?identifier=<uuid>`); `preview`/`original`
+link the file inside the library with `file://` (some viewers won't clickify
+these, and macOS privacy protection blocks the browser from reading
+`~/Pictures`). Anything without a local file falls back to the `photos` scheme.
 
 ## Journal options
 
@@ -145,17 +173,18 @@ config, and the config overrides the defaults.
 |---|---|
 | `inputs` | One or more `photos.sqlite` / `photos.json` exports (default: `out/photos.sqlite`) |
 | `--out PATH` | Output file; a `.html` path writes a browser-native page (default: `out/journal.md`) |
+| `--vault` / `--no-vault` | Write per-year Obsidian notes plus `trips.md` into `out/vault/` instead of a single file |
 | `--similarity F` | Caption-grouping threshold; lower groups more (default: 0.5) |
 | `--gap-minutes N` | Split a batch after this idle gap (default: 75) |
 | `--location-degrees F` | Start a new place after moving this far, in degrees (~0.5 km; default: 0.005) |
-| `--link MODE` | Link each count: `thumb`, `preview`, `original`, `photos`, `none` (default: `thumb`) |
+| `--link MODE` | Link each count: `thumb`, `preview`, `original`, `photos`, `none` (default: `none`) |
 | `--library PATH` | Photos library used to resolve links (default: `~/Pictures/Photos Library.photoslibrary`) |
 | `--thumb-size N` | Long-edge pixels for `--link thumb` (default: 400) |
 | `--speculative-id` / `--no-speculative-id` | Infer the owner's phone and keep only its photos (default), or `--no-…` to include every camera |
 | `--inherit-minutes N` | Give a location-less photo the nearest located photo's place within N minutes (default: 5; `0` disables) |
 | `--location-guess-km F` | Guess the place of a GPS-only photo from the nearest located photo within F km (default: 0.1; `0` disables) |
 | `--keep-junk` / `--no-keep-junk` | Keep low-value shots (documents, barcodes, receipts, menus, boxes); dropped by default |
-| `--narrative` / `--no-narrative` | Write the per-day story (default), or `--no-…` to omit |
+| `--narrative` / `--no-narrative` | Write the per-day story, or omit it (default: omitted) |
 | `--owner-name NAME` | Person to omit from `with …` (the journal owner; repeatable) |
 | `--home-label LABEL` | Label printed for photos taken at home (default: `Home`) |
 | `--home-address PREFIX` | Address prefix that marks a photo as taken at home (repeatable) |
@@ -167,6 +196,9 @@ config, and the config overrides the defaults.
 Any option can live in a YAML file, keyed by the flag name:
 
 ```yaml
+vault: true
+link: none
+narrative: false
 gap-minutes: 75
 speculative-id: true
 location-guess-km: 0.1

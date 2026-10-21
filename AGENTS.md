@@ -96,18 +96,26 @@ keep the steps separable and covered by `tests/test_journal.py`.
    Within a batch, captions are clustered by content-word string similarity
    (default 0.5) so near-identical and reworded shots collapse into one line.
    Caption-less photos fall back to their ML labels.
-5. **Rendering** — `render` (Markdown) or `render_html` (a browser-native page).
+5. **Rendering** — `render` (Markdown), `render_html` (a browser-native page),
+   or `render_vault` (per-year Obsidian notes).
    Year → month → day headings, a bold location line per place, and one bullet
    per caption cluster with a count and a `★` favorite marker. Tags add
    activities, holidays, and people/pets. Camera model is shown per day. Each
    count is a link to one example photo by `photo_url`. The `build_journal.py`
-   CLI picks the format from the `--out` extension (`.html` → HTML).
+   CLI picks the format from the `--out` extension (`.html` → HTML) or from
+   `--vault`.
 6. **Narrative** — `day_narrative(day, items, home, previous)`.
    A short story per day, told in order (where / who / what), derived only from
    that day's metadata. Days far from home get more detail, and consecutive
    far-off days read as one continuing trip (`TripState` is threaded from day to
-   day). Disable with `--no-narrative`; omit the owner's own name from `with …`
-   with `--owner-name`.
+   day). Off by default; turn it on with `--narrative`. Omit the owner's own name
+   from `with …` with `--owner-name`.
+7. **Vault summary** — `summarize_days`, `segment_trips`, `render_vault`.
+   `render_vault` reduces each day to a `DaySummary` (away flag, places with
+   coordinates, people, photo/video/favorite counts, activities, holidays, and
+   timezones), groups consecutive away days into `Trip` spans, and emits one
+   note per year plus `trips.md`. `build_vault` wires selection, batching, and
+   rendering together. Vault output defaults to `--link none` and no narrative.
 
 ### Conventions baked into the journal
 
@@ -121,13 +129,16 @@ keep the steps separable and covered by `tests/test_journal.py`.
   than `location_degrees` (~0.5 km) from the current place's anchor.
 - Descriptions come from Apple's on-device ML (`ai_caption`, labels, OCR) —
   never invented. The journal does not editorialize.
-- Each count links to one example photo via `photo_url`. The default `thumb`
-  mode copies a small `sips`-downscaled preview into `out/photos/` and links it
-  relatively (works in VS Code and browsers); `photos` uses
-  `photos://asset?identifier=<uuid>` (opens the Photos app); `preview`/`original`
-  link `file://` inside the library (often blocked); `none` is plain.
-  Unresolved links fall back to the `photos` scheme.
-- Output is a single running file (`out/journal.md`), grouped for navigation.
+- Each count links to one example photo via `photo_url` when a link mode is set.
+  The default `thumb` mode copies a small `sips`-downscaled preview into
+  `out/photos/` and links it relatively (works in VS Code and browsers); `photos`
+  uses `photos://asset?identifier=<uuid>` (opens the Photos app);
+  `preview`/`original` link `file://` inside the library (often blocked); `none`
+  is plain. Unresolved links fall back to the `photos` scheme. Obsidian vaults
+  use `none` (no image files to embed).
+- Output is a single running file (`out/journal.md`) for the standard renderer.
+  The vault renderer (`--vault DIR`) instead writes one note per year plus a
+  `trips.md` index and a `## Day index` block per year note.
 
 ## Testing
 
