@@ -39,3 +39,37 @@ jobs:
 
       - name: Run tests
         run: python -m pytest -ra
+
+  guard:
+    name: personal-data-guard
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Refuse personal data and generated exports
+        env:
+          # Optional hashed denylist (town, real names, home coordinates),
+          # set as a repository secret so the terms themselves never leak.
+          PHOTOJOURNALER_DENYLIST: ${{ secrets.PHOTOJOURNALER_DENYLIST }}
+        run: python -m photosmeta.leaks --all
+
+  secrets:
+    name: secret-scan
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Scan for secrets with gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITLEAKS_ENABLE_COMMENTS: "false"
