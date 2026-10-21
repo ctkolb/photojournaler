@@ -44,7 +44,7 @@ python3 -m venv .venv
 .venv/bin/python export_photos_metadata.py
 
 # Summary / HTML report
-.venv/bin/python analyze_photos_metadata.py out/photos.sqlite --html report.html
+.venv/bin/python analyze_photos_metadata.py out/photos.sqlite --html out/report.html
 
 # Build the journal (defaults to out/photos.sqlite)
 .venv/bin/python build_journal.py --out out/journal.md
@@ -141,7 +141,27 @@ Photos library, so it runs anywhere:
 When adding behavior, prefer small pure functions in `photosmeta/` and cover
 them in `tests/`. `tests/test_journal.py` builds `photosmeta.journal.Photo`
 objects directly; `tests/conftest.py` provides `make_photo` for the extraction
-pipeline.
+pipeline. `tests/test_check_leaks.py` covers the personal-data guard.
+
+## Keeping personal data out of git
+
+This repository must never carry real exports, journals, or locations. Three
+layers guard that:
+
+- **`.gitignore`** covers the generated-output names (`report*.html`,
+  `photos*.json`, `photos*.csv`, `journal*.md`, `journal*.html`, `/photos/`,
+  `vault/`, `config*.yaml`, `*.photoslibrary/`) plus a stray `CLAUDE.md`.
+- **`photosmeta/leaks.py`** refuses data files (`*.sqlite`, `*.json`, `*.csv`,
+  `*.jpg`, `*.heic`, …) outside `tests/fixtures/` and any denylisted term. The
+  denylist (town, real names, home coordinates) lives *outside* the repo — at
+  `--denylist`, `PHOTOJOURNALER_DENYLIST_FILE`, or
+  `~/.config/photojournaler/denylist.txt` — or is stored as `sha256:` hashes,
+  so the list itself never leaks. Run it with
+  `python -m photosmeta.leaks --staged` (or `--all`); generate hashes with
+  `python -m photosmeta.leaks --hash TERM`.
+- **`.githooks/pre-commit`** runs the guard and [gitleaks](https://github.com/gitleaks/gitleaks)
+  on staged files. Enable it once with `git config core.hooksPath .githooks`.
+  CI runs the same guard on every tracked file and a gitleaks secret scan.
 
 ## Conventions
 
