@@ -10,6 +10,7 @@
 
 inputs: []
 out: out/journal.md
+vault: false
 gap-minutes: 75
 similarity: 0.5
 location-degrees: 0.005
