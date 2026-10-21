@@ -33,6 +33,7 @@ python3 -m venv .venv
 | `analyze_photos_metadata.py` | CLI: export → console summary / HTML report |
 | `build_journal.py` | CLI: export(s) → `out/journal.md` |
 | `docs/roadmap.md` | Future improvement ideas (selected + AI-proposed) |
+| `config.example.yaml` | Example journal config (generic values; copy to `config.yaml`) |
 | `tests/` | Hermetic pytest suite (duck-typed fakes; no real library) |
 | `out/` | Generated outputs (gitignored) |
 | `LICENSE` | GNU GPL v3.0-or-later |
@@ -142,6 +143,8 @@ When adding behavior, prefer small pure functions in `photosmeta/` and cover
 them in `tests/`. `tests/test_journal.py` builds `photosmeta.journal.Photo`
 objects directly; `tests/conftest.py` provides `make_photo` for the extraction
 pipeline. `tests/test_check_leaks.py` covers the personal-data guard.
+`tests/test_contracts.py` keeps the flags and config keys documented in
+`AGENTS.md` / `README.md` in sync with the CLIs and `config.example.yaml`.
 
 ## Keeping personal data out of git
 
