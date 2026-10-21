@@ -6,4 +6,20 @@ out/
 __pycache__/
 *.pyc
 .DS_Store
-config.yaml
+
+# Generated outputs — never commit personal data. These mirror the paths the
+# CLIs write when pointed outside ./out (which is already ignored above).
+report*.html
+photos*.json
+photos*.csv
+journal*.md
+journal*.html
+/photos/
+vault/
+config*.yaml
+config*.yml
+!config.example.yaml
+*.photoslibrary/
+
+# Local agent/tooling files that mirror docs already in the repo.
+CLAUDE.md
