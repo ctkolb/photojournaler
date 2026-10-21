@@ -188,6 +188,11 @@ layers guard that:
   `git reset --hard` here. Any cleanup of generated output (`out/photos/`
   thumbnails, stale exports) must print the exact list first and wait for the
   owner's approval. Prefer additive changes.
+- **Private data never leaves the machine.** Do not upload, post, or transmit
+  library metadata, exports, journals, thumbnails, denylist terms, or any
+  derived personal data to a network service, and do not add code that does.
+  The tool is local-only; network access is out of scope unless the owner
+  explicitly asks for a feature that requires it.
 
 ## Conventions
 

@@ -46,6 +46,10 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
+        with:
+          # The history guard compares the branch with origin/main and scans
+          # its commit messages and branch name, so full history is required.
+          fetch-depth: 0
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -57,7 +61,7 @@ jobs:
           # Optional hashed denylist (town, real names, home coordinates),
           # set as a repository secret so the terms themselves never leak.
           PHOTOJOURNALER_DENYLIST: ${{ secrets.PHOTOJOURNALER_DENYLIST }}
-        run: python -m photosmeta.leaks --all --gitignore
+        run: python -m photosmeta.leaks --full
 
   secrets:
     name: secret-scan
