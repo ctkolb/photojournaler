@@ -152,18 +152,25 @@ layers guard that:
   `photos*.json`, `photos*.csv`, `journal*.md`, `journal*.html`, `/photos/`,
   `vault/`, `config*.yaml`, `*.photoslibrary/`) plus a stray `CLAUDE.md`.
 - **`photosmeta/leaks.py`** refuses data files (`*.sqlite`, `*.json`, `*.csv`,
-  `*.jpg`, `*.heic`, …) outside `tests/fixtures/` and any denylisted term. The
-  denylist (town, real names, home coordinates) lives *outside* the repo — at
-  `--denylist`, `PHOTOJOURNALER_DENYLIST_FILE`, or
+  `*.jpg`, `*.heic`, …) outside   `tests/fixtures/`, any denylisted term, and machine-specific patterns (macOS
+  and Linux home paths, macOS `Library` paths, iCloud vault paths, private-key
+  blocks). The denylist (town, real names, home
+  coordinates) lives *outside* the repo — at `--denylist`,
+  `PHOTOJOURNALER_DENYLIST_FILE`, or
   `~/.config/photojournaler/denylist.txt` — or is stored as `sha256:` hashes,
   so the list itself never leaks. Run it with
-  `python -m photosmeta.leaks --staged` (or `--all`); generate hashes with
+  `python -m photosmeta.leaks --staged` (pre-commit), `--all` (tracked files),
+  or `--full` (tracked files + the `.gitignore` self-test + history);
+  `--gitignore` and `--history` can be run on their own. Generate hashes with
   `python -m photosmeta.leaks --hash TERM`.
+- **`--gitignore`** self-tests the rules: the generated-output and data paths
+  must stay ignored and the app files must not be. **`--history`** scans the
+  branch name and the commit messages since the default branch for denylisted
+  terms.
 - **`.githooks/pre-commit`** runs the guard and [gitleaks](https://github.com/gitleaks/gitleaks)
-  on staged files. **`.githooks/pre-push`** mirrors CI: the test suite, the
-  guard over every tracked file (`--all`), and a gitleaks secret scan before
-  anything leaves the machine. Enable both once with
-  `git config core.hooksPath .githooks`.
+  on staged files. **`.githooks/pre-push`** mirrors CI: the test suite, the full
+  guard (`--full`), and a gitleaks secret scan before anything leaves the
+  machine. Enable both once with `git config core.hooksPath .githooks`.
 
 ## Conventions
 
