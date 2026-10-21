@@ -21,8 +21,8 @@ fi
 echo "pre-push: running tests..." >&2
 "$python" -m pytest
 
-echo "pre-push: checking tracked files for personal data..." >&2
-"$python" -m photosmeta.leaks --all
+echo "pre-push: checking tracked files, .gitignore rules, and history..." >&2
+"$python" -m photosmeta.leaks --full
 
 if command -v gitleaks >/dev/null 2>&1; then
     echo "pre-push: scanning for secrets..." >&2
