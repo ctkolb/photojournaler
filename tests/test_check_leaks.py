@@ -4,6 +4,7 @@
 
 from __future__ import annotations
 
+import subprocess
 from pathlib import Path
 
 from photosmeta import leaks
@@ -87,3 +88,79 @@ def test_load_denylist_merges_file_and_inline(tmp_path: Path):
 def test_load_denylist_keeps_coordinate_commas():
     literals, _ = leaks.load_denylist(None, "37.7749,-122.4194")
     assert literals == ["37.7749,-122.4194"]
+
+
+def test_scan_patterns_flags_machine_paths():
+    findings = leaks.scan_patterns("code.py", 'HOME = "/Users/chris/Pictures"')
+    assert findings == ["code.py:1: possible macOS home path"]
+
+    findings = leaks.scan_patterns("code.py", "root=/home/chris, lib=Library/Mobile")
+    assert "code.py:1: possible Linux home path" in findings
+    assert "code.py:1: possible macOS Library path" in findings
+
+
+def test_scan_patterns_flags_private_key_block():
+    findings = leaks.scan_patterns("key.pem", "-----BEGIN RSA PRIVATE KEY-----")
+    assert findings == ["key.pem:1: possible private key block"]
+
+
+def test_scan_patterns_ignores_clean_text():
+    assert leaks.scan_patterns("notes.md", "a walk by the river") == []
+
+
+def test_check_exempts_guard_from_pattern_scan(tmp_path: Path):
+    for name in leaks.PATTERN_EXEMPT:
+        target = tmp_path / name
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text("home is /Users/chris/Pictures\n", encoding="utf-8")
+        assert leaks.check([name], [], set(), root=tmp_path) == []
+
+
+def test_gitignore_selftest_flags_missing_ignores():
+    findings = leaks.gitignore_selftest(lambda path: False)
+    assert len(findings) == len(leaks.MUST_BE_IGNORED)
+    assert all("expected to be gitignored" in f for f in findings)
+
+
+def test_gitignore_selftest_flags_ignored_app_files():
+    findings = leaks.gitignore_selftest(lambda path: True)
+    assert len(findings) == len(leaks.MUST_BE_TRACKED)
+    assert all("expected to be tracked" in f for f in findings)
+
+
+def test_gitignore_selftest_passes_when_rules_hold():
+    ignored = set(leaks.MUST_BE_IGNORED)
+    assert leaks.gitignore_selftest(lambda path: path in ignored) == []
+
+
+def test_scan_history_flags_branch_and_commit_messages(tmp_path: Path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    nohooks = tmp_path / "nohooks"
+    nohooks.mkdir()
+    subprocess.run(["git", "init", "-q", "-b", "main", str(repo)], check=True)
+    for key, value in (
+        ("user.email", "test@example.com"),
+        ("user.name", "Test"),
+        ("commit.gpgsign", "false"),
+        ("core.hooksPath", str(nohooks)),
+    ):
+        subprocess.run(["git", "-C", str(repo), "config", key, value], check=True)
+    subprocess.run(
+        ["git", "-C", str(repo), "commit", "--allow-empty", "-qm", "initial"],
+        check=True,
+    )
+    subprocess.run(
+        ["git", "-C", str(repo), "switch", "-q", "-c", "trip-to-Fairview"],
+        check=True,
+    )
+    subprocess.run(
+        ["git", "-C", str(repo), "commit", "--allow-empty", "-qm", "visit Fairview"],
+        check=True,
+    )
+
+    findings = leaks.scan_history(["Fairview"], set(), root=repo)
+
+    assert "branch name: matches a denylisted term" in findings
+    assert "commit messages (main..HEAD): matches a denylisted term" in findings
+

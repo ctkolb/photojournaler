@@ -1,7 +1,15 @@
 # Branch protection for `main`
 
-Goal: no commit can land on `main` unless the CI status check **`test`**
-(the job in `.github/workflows/ci.yml`) has passed.
+Goal: no commit can land on `main` unless all CI status checks in
+`.github/workflows/ci.yml` have passed:
+
+- **`test`** — the hermetic pytest suite.
+- **`personal-data-guard`** — refuses data files, denylisted terms, machine
+  paths, generated outputs, and denylisted terms in history.
+- **`secret-scan`** — gitleaks over the full git history.
+
+All three are required so a data or secret leak cannot be merged even if the
+local hooks were skipped.
 
 ## Prerequisites
 
@@ -33,7 +41,11 @@ gh api --method POST repos/ctkolb/photojournaler/rulesets --input - <<'JSON'
       "type": "required_status_checks",
       "parameters": {
         "strict_required_status_checks_policy": true,
-        "required_status_checks": [ { "context": "test" } ]
+        "required_status_checks": [
+          { "context": "test" },
+          { "context": "personal-data-guard" },
+          { "context": "secret-scan" }
+        ]
       }
     },
     {
@@ -51,7 +63,8 @@ gh api --method POST repos/ctkolb/photojournaler/rulesets --input - <<'JSON'
 JSON
 ```
 
-- **required_status_checks** — blocks merge until `test` is green.
+- **required_status_checks** — blocks merge until `test`, `personal-data-guard`,
+  and `secret-scan` are all green.
 - **strict** — also requires the branch to be up to date with `main` first.
 - **pull_request** with `0` approvals — forces a PR (and therefore the check)
   but still lets a solo maintainer self-merge once checks pass.
@@ -62,7 +75,10 @@ JSON
 ```sh
 gh api --method PUT repos/ctkolb/photojournaler/branches/main/protection --input - <<'JSON'
 {
-  "required_status_checks": { "strict": true, "contexts": ["test"] },
+  "required_status_checks": {
+    "strict": true,
+    "contexts": ["test", "personal-data-guard", "secret-scan"]
+  },
   "enforce_admins": true,
   "required_pull_request_reviews": { "required_approving_review_count": 1 },
   "restrictions": null,

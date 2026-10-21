@@ -1,0 +1,29 @@
+# Example photojournaler config. Copy to config.yaml and edit. Every key can
+# also be set with the matching command-line flag (flags override the config,
+# which overrides the built-in defaults). Write a ready-to-edit copy of the
+# current defaults with:
+#
+#   .venv/bin/python build_journal.py --generate-config config.yaml
+#
+# All values here are generic placeholders. config.yaml is gitignored; never
+# commit a config that names real people, places, or your home address.
+
+inputs: []
+out: out/journal.md
+vault: false
+gap-minutes: 75
+similarity: 0.5
+location-degrees: 0.005
+link: thumb
+library: "~/Pictures/Photos Library.photoslibrary"
+thumb-size: 400
+speculative-id: true
+inherit-minutes: 5
+location-guess-km: 0.1
+keep-junk: false
+narrative: true
+owner-name: []
+home-label: Home
+home-address: []
+home-place: []
+quiet: false

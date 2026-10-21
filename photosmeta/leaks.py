@@ -2,7 +2,7 @@
 # Copyright (C) 2026 ctkolb
 """Fail when personal data would be committed.
 
-Two independent checks run over a set of files:
+Five checks keep personal data out of the repository:
 
 1. **Path guard** — data-bearing files (``*.sqlite``, ``*.json``, ``*.csv``,
    ``*.jpg``, ``*.heic``, …) are refused outside ``tests/fixtures/``.
@@ -11,14 +11,26 @@ Two independent checks run over a set of files:
    so it is read at runtime from outside the repo, or stored as ``sha256:``
    hashes. Plain entries match case-insensitively as substrings; hashed
    entries match individual tokens, so multi-word terms can be hashed too.
+3. **Pattern guard** — machine-specific and personal patterns (macOS and Linux
+   home paths, ``Library/Mobile``, ``iCloud~md``, private-key blocks) are
+   refused anywhere. The guard and its tests hold literal examples, so they are
+   exempt.
+4. **``.gitignore`` self-test** (``--gitignore``) — the generated-output and
+   data paths are still ignored, and the app files are not.
+5. **History guard** (``--history``) — denylisted terms in the branch name and
+   in the commit messages since the default branch.
 
 Run it as ``python -m photosmeta.leaks --staged`` (pre-commit) or
-``python -m photosmeta.leaks --all`` (CI). The denylist is read from
-``--denylist`` / ``PHOTOJOURNALER_DENYLIST_FILE`` (one entry per line, ``#``
-comments, ``sha256:<hex>`` for hashes) and inline from
+``python -m photosmeta.leaks --full`` (all tracked files, the ``.gitignore``
+self-test, and history; used by the pre-push hook). ``--all`` runs the content
+guards over every tracked file, and ``--gitignore`` / ``--history`` may be
+combined on their own.
+
+The denylist is read from ``--denylist`` / ``PHOTOJOURNALER_DENYLIST_FILE`` (one
+entry per line, ``#`` comments, ``sha256:<hex>`` for hashes) and inline from
 ``PHOTOJOURNALER_DENYLIST`` (entries separated by newlines, so entries may
-contain commas, as coordinates do). With no denylist configured the path
-guard still runs.
+contain commas, as coordinates do). With no denylist configured the path and
+pattern guards still run.
 
 Print hashed entries with ``python -m photosmeta.leaks --hash TERM``.
 """
@@ -53,6 +65,57 @@ FORBIDDEN_SUFFIXES = (
 
 FIXTURE_PARTS = ("tests", "fixtures")
 _TOKEN_RE = re.compile(r"[A-Za-z0-9@._'-]+")
+
+# Machine-specific and personal patterns refused anywhere in tracked text.
+# The guard and its tests intentionally hold literal examples, so they are the
+# decoys the scan must not flag.
+MACHINE_PATTERNS = (
+    (re.compile(r"/Users/"), "macOS home path"),
+    (re.compile(r"/home/"), "Linux home path"),
+    (re.compile(r"Library/Mobile"), "macOS Library path"),
+    (re.compile(r"iCloud~md"), "iCloud vault path"),
+    (re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----"), "private key block"),
+)
+PATTERN_EXEMPT = ("photosmeta/leaks.py", "tests/test_check_leaks.py")
+
+# Generated-output and data paths that must stay ignored, and app files that
+# must stay tracked. Verified against git by the ``.gitignore`` self-test.
+MUST_BE_IGNORED = (
+    ".venv/pyvenv.cfg",
+    "out/photos.sqlite",
+    "photos.sqlite",
+    "photos.sqlite-wal",
+    "photos.sqlite-shm",
+    "photosmeta/__pycache__/writer.cpython-312.pyc",
+    ".DS_Store",
+    "report.html",
+    "out/report.html",
+    "photos.json",
+    "photos.csv",
+    "journal.md",
+    "journal.html",
+    "photos/example.jpg",
+    "vault/notes.md",
+    "config.yaml",
+    "config.yml",
+    "Our.photoslibrary/database",
+    "CLAUDE.md",
+)
+MUST_BE_TRACKED = (
+    "photosmeta/leaks.py",
+    "photosmeta/journal.py",
+    "export_photos_metadata.py",
+    "tests/test_check_leaks.py",
+    "docs/roadmap.md",
+    "README.md",
+    "AGENTS.md",
+    "LICENSE",
+    "requirements.txt",
+    ".githooks/pre-commit",
+    ".githooks/pre-push",
+    ".github/workflows/ci.yml",
+    "config.example.yaml",
+)
 
 
 def _parts(path: str) -> tuple[str, ...]:
@@ -158,13 +221,23 @@ def collect_files(
     return _git_lines("ls-files")
 
 
+def scan_patterns(path: str, text: str) -> list[str]:
+    """Return findings for machine-specific or personal patterns in ``text``."""
+    findings: list[str] = []
+    for lineno, line in enumerate(text.splitlines(), start=1):
+        for rx, label in MACHINE_PATTERNS:
+            if rx.search(line):
+                findings.append(f"{path}:{lineno}: possible {label}")
+    return findings
+
+
 def check(
     files: list[str],
     literals: list[str],
     hashed: set[str],
     root: Path = Path("."),
 ) -> list[str]:
-    """Run both guards over ``files`` and return any violations."""
+    """Run the content guards over ``files`` and return any violations."""
     violations: list[str] = []
     for name in files:
         if is_forbidden_path(name):
@@ -178,7 +251,72 @@ def check(
             continue
         text = raw.decode("utf-8", errors="replace")
         violations.extend(scan_text(name, text, literals, hashed))
+        if name not in PATTERN_EXEMPT:
+            violations.extend(scan_patterns(name, text))
     return violations
+
+
+def gitignore_selftest(is_ignored) -> list[str]:
+    """Check the output and app paths against ``is_ignored``.
+
+    ``is_ignored`` is a ``path -> bool`` callable (git-backed in ``main``), so
+    the rule set can be exercised without a repository.
+    """
+    findings: list[str] = []
+    for path in MUST_BE_IGNORED:
+        if not is_ignored(path):
+            findings.append(f"{path}: expected to be gitignored but is not")
+    for path in MUST_BE_TRACKED:
+        if is_ignored(path):
+            findings.append(f"{path}: expected to be tracked but is gitignored")
+    return findings
+
+
+def _git_capture(*args: str, root: Path = Path(".")) -> subprocess.CompletedProcess:
+    return subprocess.run(
+        ("git", "-C", str(root)) + args, capture_output=True, text=True, check=False
+    )
+
+
+def _git_is_ignored(path: str, root: Path = Path(".")) -> bool:
+    result = subprocess.run(
+        ("git", "-C", str(root), "check-ignore", "-q", "--no-index", "--", path),
+        capture_output=True,
+    )
+    return result.returncode == 0
+
+
+def scan_history(
+    literals: list[str], hashed: set[str], root: Path = Path(".")
+) -> list[str]:
+    """Scan the branch name and commits since the default branch for terms."""
+    findings: list[str] = []
+
+    branch = _git_capture("rev-parse", "--abbrev-ref", "HEAD", root=root).stdout.strip()
+    if branch:
+        findings.extend(scan_text("branch name", branch, literals, hashed))
+
+    base = None
+    for candidate in ("origin/main", "main", "origin/master", "master"):
+        if _git_capture(
+            "rev-parse", "--verify", "--quiet", candidate, root=root
+        ).returncode == 0:
+            base = candidate
+            break
+    if base is None:
+        return findings
+
+    messages = _git_capture("log", f"{base}..HEAD", "--format=%B", root=root)
+    if messages.returncode == 0 and messages.stdout:
+        findings.extend(
+            scan_text(
+                f"commit messages ({base}..HEAD)",
+                messages.stdout,
+                literals,
+                hashed,
+            )
+        )
+    return findings
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -188,6 +326,19 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("files", nargs="*", help="paths to check (default: git files)")
     parser.add_argument("--staged", action="store_true", help="check staged files")
     parser.add_argument("--all", action="store_true", help="check all tracked files")
+    parser.add_argument(
+        "--gitignore", action="store_true", help="self-test the .gitignore rules"
+    )
+    parser.add_argument(
+        "--history",
+        action="store_true",
+        help="scan the branch name and commits for denylisted terms",
+    )
+    parser.add_argument(
+        "--full",
+        action="store_true",
+        help="all tracked files, the .gitignore self-test, and history",
+    )
     parser.add_argument(
         "--denylist", type=Path, default=None, help="denylist file (kept outside the repo)"
     )
@@ -203,15 +354,27 @@ def main(argv: list[str] | None = None) -> int:
                 print(f"{hash_token(token)}  # {term}")
         return 0
 
+    if args.full:
+        args.all = True
+        args.gitignore = True
+        args.history = True
+
     denylist_path = args.denylist or _default_denylist_path()
     literals, hashed = load_denylist(
         denylist_path, os.environ.get("PHOTOJOURNALER_DENYLIST")
     )
     if not literals and not hashed:
-        print("No denylist configured; running the path guard only.", file=sys.stderr)
+        print(
+            "No denylist configured; running the path and pattern guards only.",
+            file=sys.stderr,
+        )
 
     files = collect_files(args.files, args.staged, args.all)
     violations = check(files, literals, hashed)
+    if args.gitignore:
+        violations.extend(gitignore_selftest(_git_is_ignored))
+    if args.history:
+        violations.extend(scan_history(literals, hashed))
 
     for violation in violations:
         print(f"error: {violation}", file=sys.stderr)
