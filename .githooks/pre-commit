@@ -1,0 +1,30 @@
+#!/bin/sh
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 ctkolb
+#
+# Pre-commit guard against committing personal data, generated exports, and
+# secrets. Enable it with:
+#
+#   git config core.hooksPath .githooks
+#
+# The denylist (town, real names, home coordinates) is read at runtime from
+# outside the repo, so it never leaks. See photosmeta/leaks.py for details.
+
+set -eu
+
+root="$(git rev-parse --show-toplevel)"
+cd "$root"
+
+python="python3"
+if [ -x ".venv/bin/python" ]; then
+    python=".venv/bin/python"
+fi
+
+"$python" -m photosmeta.leaks --staged
+
+if command -v gitleaks >/dev/null 2>&1; then
+    gitleaks git --staged --redact --no-banner ||
+        gitleaks protect --staged --redact --no-banner
+else
+    echo "gitleaks not installed; skipping the secret scan." >&2
+fi

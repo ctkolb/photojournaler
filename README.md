@@ -268,7 +268,7 @@ HTML report (calendar heatmap, rankings for year, camera, country, people,
 labels, albums):
 
 ```sh
-.venv/bin/python analyze_photos_metadata.py out/photos.sqlite --html report.html
+.venv/bin/python analyze_photos_metadata.py out/photos.sqlite --html out/report.html
 ```
 
 ## Tests
@@ -287,6 +287,14 @@ runs anywhere in under a second:
 macOS runner (required, since importing `osxphotos` needs macOS). The job is
 named **`test`**; that is the required status check enforced by branch
 protection (see [`docs/branch-protection.md`](docs/branch-protection.md)).
+
+Two more jobs keep personal data out of the repository: **`personal-data-guard`**
+refuses data files (`*.sqlite`, `*.json`, `*.csv`, `*.jpg`, `*.heic`, …) outside
+`tests/fixtures/` and any denylisted term, and **`secret-scan`** runs
+[gitleaks](https://github.com/gitleaks/gitleaks). The same guard runs locally in
+`.githooks/pre-commit`; enable it once with
+`git config core.hooksPath .githooks`. The denylist lives outside the repo, so
+it never leaks — see [`AGENTS.md`](AGENTS.md#keeping-personal-data-out-of-git).
 
 ## Design principles
 
