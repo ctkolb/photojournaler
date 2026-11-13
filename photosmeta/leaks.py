@@ -32,7 +32,7 @@ The denylist is read from ``--denylist`` / ``PHOTOJOURNALER_DENYLIST_FILE`` (one
 entry per line, ``#`` comments, ``sha256:<hex>`` for hashes) and inline from
 ``PHOTOJOURNALER_DENYLIST`` (entries separated by newlines, so entries may
 contain commas, as coordinates do). With no denylist configured the path and
-pattern guards still run.
+pattern guards still run; ``--require-denylist`` (pre-push and CI) fails instead.
 
 Print hashed entries with ``python -m photosmeta.leaks --hash TERM``.
 """
@@ -386,6 +386,11 @@ def main(argv: list[str] | None = None) -> int:
         "--denylist", type=Path, default=None, help="denylist file (kept outside the repo)"
     )
     parser.add_argument(
+        "--require-denylist",
+        action="store_true",
+        help="fail when no denylist is configured (used by pre-push and CI)",
+    )
+    parser.add_argument(
         "--hash", action="append", metavar="TERM",
         help="print sha256 hashes for TERM and exit",
     )
@@ -406,7 +411,8 @@ def main(argv: list[str] | None = None) -> int:
     literals, hashed = load_denylist(
         denylist_path, os.environ.get("PHOTOJOURNALER_DENYLIST")
     )
-    if not literals and not hashed:
+    missing_denylist = not literals and not hashed
+    if missing_denylist and not args.require_denylist:
         print(
             "No denylist configured; running the path and pattern guards only.",
             file=sys.stderr,
@@ -414,6 +420,12 @@ def main(argv: list[str] | None = None) -> int:
 
     files = collect_files(args.files, args.staged, args.all)
     violations = check(files, literals, hashed, staged=args.staged and not args.files)
+    if missing_denylist and args.require_denylist:
+        violations.append(
+            "no denylist configured (--require-denylist): create "
+            "~/.config/photojournaler/denylist.txt or set "
+            "PHOTOJOURNALER_DENYLIST / PHOTOJOURNALER_DENYLIST_FILE"
+        )
     if args.gitignore:
         violations.extend(gitignore_selftest(_git_is_ignored))
     if args.history:

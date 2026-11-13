@@ -58,10 +58,18 @@ jobs:
 
       - name: Refuse personal data and generated exports
         env:
-          # Optional hashed denylist (town, real names, home coordinates),
-          # set as a repository secret so the terms themselves never leak.
+          # Hashed denylist (town, real names, home coordinates), set as a
+          # repository secret so the terms themselves never leak.
           PHOTOJOURNALER_DENYLIST: ${{ secrets.PHOTOJOURNALER_DENYLIST }}
-        run: python -m photosmeta.leaks --full
+          # Pull requests from forks get no secrets, so only they may run
+          # without the denylist.
+          FROM_FORK: ${{ github.event.pull_request.head.repo.fork }}
+        run: |
+          if [ "$FROM_FORK" = "true" ]; then
+            python -m photosmeta.leaks --full
+          else
+            python -m photosmeta.leaks --full --require-denylist
+          fi
 
   secrets:
     name: secret-scan

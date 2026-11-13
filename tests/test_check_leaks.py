@@ -223,3 +223,28 @@ def test_check_staged_scans_the_index_copy(tmp_path: Path):
     assert staged == ["story.md: matches a denylisted term"]
     assert worktree == []
 
+
+
+def _isolate_denylist(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.delenv("PHOTOJOURNALER_DENYLIST", raising=False)
+    monkeypatch.delenv("PHOTOJOURNALER_DENYLIST_FILE", raising=False)
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
+
+
+def test_require_denylist_fails_without_one(tmp_path: Path, monkeypatch, capsys):
+    _isolate_denylist(tmp_path, monkeypatch)
+    clean = tmp_path / "notes.md"
+    clean.write_text("a walk by the river\n", encoding="utf-8")
+
+    assert leaks.main([str(clean)]) == 0
+    assert leaks.main(["--require-denylist", str(clean)]) == 1
+    assert "no denylist configured" in capsys.readouterr().err
+
+
+def test_require_denylist_passes_with_one(tmp_path: Path, monkeypatch):
+    _isolate_denylist(tmp_path, monkeypatch)
+    monkeypatch.setenv("PHOTOJOURNALER_DENYLIST", leaks.hash_token("Fairview"))
+    clean = tmp_path / "notes.md"
+    clean.write_text("a walk by the river\n", encoding="utf-8")
+
+    assert leaks.main(["--require-denylist", str(clean)]) == 0
