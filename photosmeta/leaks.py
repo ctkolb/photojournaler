@@ -6,7 +6,8 @@ Five checks keep personal data out of the repository:
 
 1. **Path guard** — data-bearing files (``*.sqlite``, ``*.json``, ``*.csv``,
    ``*.jpg``, ``*.heic``, …), credentials (``*.pem``, ``*.key``, ``.env``), and
-   denylist copies (``denylist*.txt``) are refused outside ``tests/fixtures/``.
+   denylist copies (``denylist*.txt``) are refused outside ``tests/fixtures/``,
+   and any file over ``MAX_FILE_BYTES`` (1 MiB) is refused anywhere.
 2. **Denylist guard** — forbidden terms (a town, a real name, home
    coordinates) are refused anywhere. The list itself must never be committed,
    so it is read at runtime from outside the repo, or stored as ``sha256:``
@@ -64,6 +65,29 @@ FORBIDDEN_SUFFIXES = (
     ".tiff",
     ".mov",
     ".mp4",
+    ".m4v",
+    ".avi",
+    ".3gp",
+    ".gif",
+    ".webp",
+    # Camera RAW and Photos edit sidecars.
+    ".dng",
+    ".cr2",
+    ".cr3",
+    ".nef",
+    ".arw",
+    ".aae",
+    # Location tracks.
+    ".gpx",
+    ".kml",
+    ".kmz",
+    # Other databases and archives that could carry an export.
+    ".db",
+    ".sqlite3",
+    ".zip",
+    ".tar",
+    ".gz",
+    ".7z",
     ".photoslibrary",
     # Credentials.
     ".pem",
@@ -75,6 +99,10 @@ FORBIDDEN_SUFFIXES = (
 # denylist (its hashed entries match nothing, so a content scan cannot catch
 # a committed copy) and environment files.
 FORBIDDEN_NAMES = ("denylist*.txt", ".env", ".env.*")
+
+# Any tracked file larger than this is refused: source and docs stay far
+# below it, so a large file is almost always an export or media.
+MAX_FILE_BYTES = 1024 * 1024
 
 FIXTURE_PARTS = ("tests", "fixtures")
 _TOKEN_RE = re.compile(r"[A-Za-z0-9@._'-]+")
@@ -309,6 +337,11 @@ def check(
             continue
         raw = read(name, root)
         if raw is None:
+            continue
+        if len(raw) > MAX_FILE_BYTES:
+            violations.append(
+                f"{name}: {len(raw)} bytes, over the {MAX_FILE_BYTES} byte limit"
+            )
             continue
         if b"\x00" in raw:
             continue

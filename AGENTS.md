@@ -168,8 +168,9 @@ layers guard that:
   `*.key`, `*.p12`, `*.pfx`), stray denylist copies (`denylist*.txt`), and local
   agent files (`CLAUDE.md`, `opencode.jsonc`).
 - **`photosmeta/leaks.py`** refuses data files (`*.sqlite`, `*.json`, `*.csv`,
-  `*.jpg`, `*.heic`, …), credential files, and denylist copies outside
-  `tests/fixtures/`, any denylisted term, and machine-specific patterns (macOS
+  `*.jpg`, `*.heic`, RAW, `*.aae`, `*.gpx`/`*.kml`, archives, …), credential
+  files, and denylist copies outside `tests/fixtures/`, any file over 1 MiB, any
+  denylisted term, and machine-specific patterns (macOS
   and Linux home paths, macOS `Library` paths, iCloud vault paths, private-key
   blocks). The denylist (town, real names, home
   coordinates) lives *outside* the repo — at `--denylist`,

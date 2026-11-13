@@ -18,6 +18,11 @@ def test_is_forbidden_path_flags_data_files():
     assert leaks.is_forbidden_path("out/export.csv")
     assert leaks.is_forbidden_path("IMG_0001.HEIC")
     assert leaks.is_forbidden_path("clip.mp4")
+    assert leaks.is_forbidden_path("IMG_0001.AAE")
+    assert leaks.is_forbidden_path("raw/IMG_0001.dng")
+    assert leaks.is_forbidden_path("walks/2025-06-01.gpx")
+    assert leaks.is_forbidden_path("trip.kmz")
+    assert leaks.is_forbidden_path("backup/library.zip")
 
 
 def test_is_forbidden_path_flags_credentials_and_denylists():
@@ -82,6 +87,16 @@ def test_check_scans_text_files(tmp_path: Path):
     (tmp_path / "notes.md").write_text("home in Fairview", encoding="utf-8")
     violations = leaks.check(["notes.md"], ["Fairview"], set(), root=tmp_path)
     assert violations == ["notes.md: matches a denylisted term"]
+
+
+def test_check_refuses_oversized_files(tmp_path: Path):
+    (tmp_path / "dump.txt").write_bytes(b"a" * (leaks.MAX_FILE_BYTES + 1))
+    (tmp_path / "ok.txt").write_bytes(b"a" * leaks.MAX_FILE_BYTES)
+    violations = leaks.check(["dump.txt", "ok.txt"], [], set(), root=tmp_path)
+    assert violations == [
+        f"dump.txt: {leaks.MAX_FILE_BYTES + 1} bytes, "
+        f"over the {leaks.MAX_FILE_BYTES} byte limit"
+    ]
 
 
 def test_check_skips_binary_files(tmp_path: Path):
