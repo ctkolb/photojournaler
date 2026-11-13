@@ -188,8 +188,9 @@ layers guard that:
   them without the denylist.
 - **`--gitignore`** self-tests the rules: the generated-output and data paths
   must stay ignored and the app files must not be. **`--history`** scans the
-  branch name and the commit messages since the default branch for denylisted
-  terms.
+  branch name, the commit messages, and the lines and file names each commit
+  added since the default branch for denylisted terms, so a term added and
+  later removed is still caught. File names in the tree are scanned too.
 - **`.githooks/pre-commit`** runs the guard and [gitleaks](https://github.com/gitleaks/gitleaks)
   on staged files. **`.githooks/pre-push`** mirrors CI: the test suite, the full
   guard (`--full --require-denylist`), and a gitleaks secret scan before anything leaves the
