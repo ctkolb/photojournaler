@@ -7,6 +7,8 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path
 
+import pytest
+
 from photosmeta import leaks
 
 
@@ -133,7 +135,12 @@ def test_gitignore_selftest_passes_when_rules_hold():
     assert leaks.gitignore_selftest(lambda path: path in ignored) == []
 
 
-def test_scan_history_flags_branch_and_commit_messages(tmp_path: Path):
+def _git(repo: Path, *args: str) -> None:
+    subprocess.run(["git", "-C", str(repo), *args], check=True)
+
+
+def _git_repo(tmp_path: Path) -> Path:
+    """An empty repo on ``main`` with one commit and no hooks."""
     repo = tmp_path / "repo"
     repo.mkdir()
     nohooks = tmp_path / "nohooks"
@@ -145,22 +152,74 @@ def test_scan_history_flags_branch_and_commit_messages(tmp_path: Path):
         ("commit.gpgsign", "false"),
         ("core.hooksPath", str(nohooks)),
     ):
-        subprocess.run(["git", "-C", str(repo), "config", key, value], check=True)
-    subprocess.run(
-        ["git", "-C", str(repo), "commit", "--allow-empty", "-qm", "initial"],
-        check=True,
-    )
-    subprocess.run(
-        ["git", "-C", str(repo), "switch", "-q", "-c", "trip-to-Fairview"],
-        check=True,
-    )
-    subprocess.run(
-        ["git", "-C", str(repo), "commit", "--allow-empty", "-qm", "visit Fairview"],
-        check=True,
-    )
+        _git(repo, "config", key, value)
+    _git(repo, "commit", "--allow-empty", "-qm", "initial")
+    return repo
+
+
+def test_scan_history_flags_branch_and_commit_messages(tmp_path: Path, monkeypatch):
+    monkeypatch.delenv("GITHUB_HEAD_REF", raising=False)
+    repo = _git_repo(tmp_path)
+    _git(repo, "switch", "-q", "-c", "trip-to-Fairview")
+    _git(repo, "commit", "--allow-empty", "-qm", "visit Fairview")
 
     findings = leaks.scan_history(["Fairview"], set(), root=repo)
 
     assert "branch name: matches a denylisted term" in findings
     assert "commit messages (main..HEAD): matches a denylisted term" in findings
+
+
+def test_scan_history_uses_github_head_ref_on_detached_head(tmp_path: Path, monkeypatch):
+    repo = _git_repo(tmp_path)
+    _git(repo, "switch", "-q", "--detach")
+    monkeypatch.setenv("GITHUB_HEAD_REF", "trip-to-Fairview")
+
+    findings = leaks.scan_history(["Fairview"], set(), root=repo)
+
+    assert "branch name: matches a denylisted term" in findings
+
+
+@pytest.mark.parametrize(
+    "text", ["in Fairview.", "Fairview's park", "Fairview-bound", "(Fairview)"]
+)
+def test_scan_text_hash_matches_through_punctuation(text):
+    hashed = {leaks.hash_token("Fairview")}
+    findings = leaks.scan_text("notes.md", text, [], hashed)
+    assert findings == ["notes.md:1: matches a hashed denylist entry"]
+
+
+def test_scan_text_hash_still_matches_punctuated_entries():
+    hashed = {leaks.hash_token("41.8781")}
+    findings = leaks.scan_text("notes.md", "at 41.8781, -87.6", [], hashed)
+    assert findings == ["notes.md:1: matches a hashed denylist entry"]
+
+
+def test_collect_files_staged_includes_renames(tmp_path: Path, monkeypatch):
+    repo = _git_repo(tmp_path)
+    (repo / "notes.txt").write_text("a b c d e f g h\n", encoding="utf-8")
+    _git(repo, "add", "notes.txt")
+    _git(repo, "commit", "-qm", "notes")
+    _git(repo, "mv", "notes.txt", "export.csv")
+    monkeypatch.chdir(repo)
+
+    files = leaks.collect_files([], staged=True, all_files=False)
+
+    assert files == ["export.csv"]
+    assert leaks.check(files, [], set(), staged=True) == [
+        "export.csv: data file outside tests/fixtures/"
+    ]
+
+
+def test_check_staged_scans_the_index_copy(tmp_path: Path):
+    repo = _git_repo(tmp_path)
+    story = repo / "story.md"
+    story.write_text("visit Fairview\n", encoding="utf-8")
+    _git(repo, "add", "story.md")
+    story.write_text("visit town\n", encoding="utf-8")
+
+    staged = leaks.check(["story.md"], ["Fairview"], set(), root=repo, staged=True)
+    worktree = leaks.check(["story.md"], ["Fairview"], set(), root=repo)
+
+    assert staged == ["story.md: matches a denylisted term"]
+    assert worktree == []
 

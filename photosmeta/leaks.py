@@ -11,6 +11,8 @@ Five checks keep personal data out of the repository:
    so it is read at runtime from outside the repo, or stored as ``sha256:``
    hashes. Plain entries match case-insensitively as substrings; hashed
    entries match individual tokens, so multi-word terms can be hashed too.
+   A token also matches without surrounding or joining punctuation, so
+   ``Fairview.`` and ``Fairview's`` match a hash of ``Fairview``.
 3. **Pattern guard** — machine-specific and personal patterns (macOS and Linux
    home paths, ``Library/Mobile``, ``iCloud~md``, private-key blocks) are
    refused anywhere. The guard and its tests hold literal examples, so they are
@@ -65,6 +67,10 @@ FORBIDDEN_SUFFIXES = (
 
 FIXTURE_PARTS = ("tests", "fixtures")
 _TOKEN_RE = re.compile(r"[A-Za-z0-9@._'-]+")
+# Characters a token may carry around a word (``Fairview.``, ``Fairview's``,
+# ``Fairview-bound``); hashed entries also match the token without them.
+_TOKEN_PUNCT = "._'-"
+_TOKEN_SPLIT_RE = re.compile(r"[._'-]+")
 
 # Machine-specific and personal patterns refused anywhere in tracked text.
 # The guard and its tests intentionally hold literal examples, so they are the
@@ -142,6 +148,18 @@ def hash_token(token: str) -> str:
     return "sha256:" + hashlib.sha256(token.lower().encode("utf-8")).hexdigest()
 
 
+def token_variants(token: str) -> set[str]:
+    """Return ``token`` plus its forms without surrounding or joining punctuation.
+
+    ``Fairview.`` also yields ``Fairview``, and ``Fairview's`` / ``Fairview-bound``
+    also yield ``Fairview``, so a hashed word still matches in running text.
+    """
+    variants = {token, token.strip(_TOKEN_PUNCT)}
+    variants.update(_TOKEN_SPLIT_RE.split(token))
+    variants.discard("")
+    return variants
+
+
 def parse_denylist(text: str) -> tuple[list[str], set[str]]:
     """Split denylist ``text`` into literal terms and hashed token hashes."""
     literals: list[str] = []
@@ -192,12 +210,13 @@ def scan_text(
         seen: set[str] = set()
         for lineno, line in enumerate(text.splitlines(), start=1):
             for token in _TOKEN_RE.findall(line):
-                digest = hash_token(token)
-                if digest in hashed and digest not in seen:
-                    seen.add(digest)
-                    findings.append(
-                        f"{path}:{lineno}: matches a hashed denylist entry"
-                    )
+                for variant in token_variants(token):
+                    digest = hash_token(variant)
+                    if digest in hashed and digest not in seen:
+                        seen.add(digest)
+                        findings.append(
+                            f"{path}:{lineno}: matches a hashed denylist entry"
+                        )
     return findings
 
 
@@ -215,7 +234,8 @@ def collect_files(
     if files:
         return files
     if staged:
-        return _git_lines("diff", "--cached", "--name-only", "--diff-filter=ACM")
+        # R and T included: a rename or type change can introduce a data file.
+        return _git_lines("diff", "--cached", "--name-only", "--diff-filter=ACMRT")
     if all_files:
         return _git_lines("ls-files")
     return _git_lines("ls-files")
@@ -231,22 +251,41 @@ def scan_patterns(path: str, text: str) -> list[str]:
     return findings
 
 
+def read_worktree(name: str, root: Path = Path(".")) -> bytes | None:
+    """Return a file's working-tree bytes, or ``None`` if it is not a file."""
+    path = root / name
+    return path.read_bytes() if path.is_file() else None
+
+
+def read_staged(name: str, root: Path = Path(".")) -> bytes | None:
+    """Return a file's staged (index) bytes — what the commit will contain."""
+    result = subprocess.run(
+        ("git", "-C", str(root), "show", f":{name}"), capture_output=True
+    )
+    return result.stdout if result.returncode == 0 else None
+
+
 def check(
     files: list[str],
     literals: list[str],
     hashed: set[str],
     root: Path = Path("."),
+    staged: bool = False,
 ) -> list[str]:
-    """Run the content guards over ``files`` and return any violations."""
+    """Run the content guards over ``files`` and return any violations.
+
+    With ``staged`` the index copy is scanned, so a partial ``git add -p``
+    is checked as it will be committed rather than as it sits on disk.
+    """
+    read = read_staged if staged else read_worktree
     violations: list[str] = []
     for name in files:
         if is_forbidden_path(name):
             violations.append(f"{name}: data file outside tests/fixtures/")
             continue
-        path = root / name
-        if not path.is_file():
+        raw = read(name, root)
+        if raw is None:
             continue
-        raw = path.read_bytes()
         if b"\x00" in raw:
             continue
         text = raw.decode("utf-8", errors="replace")
@@ -292,7 +331,11 @@ def scan_history(
     """Scan the branch name and commits since the default branch for terms."""
     findings: list[str] = []
 
-    branch = _git_capture("rev-parse", "--abbrev-ref", "HEAD", root=root).stdout.strip()
+    # A pull-request checkout in CI is a detached HEAD; GitHub names the
+    # source branch in GITHUB_HEAD_REF instead.
+    branch = os.environ.get("GITHUB_HEAD_REF") or _git_capture(
+        "rev-parse", "--abbrev-ref", "HEAD", root=root
+    ).stdout.strip()
     if branch:
         findings.extend(scan_text("branch name", branch, literals, hashed))
 
@@ -370,7 +413,7 @@ def main(argv: list[str] | None = None) -> int:
         )
 
     files = collect_files(args.files, args.staged, args.all)
-    violations = check(files, literals, hashed)
+    violations = check(files, literals, hashed, staged=args.staged and not args.files)
     if args.gitignore:
         violations.extend(gitignore_selftest(_git_is_ignored))
     if args.history:
