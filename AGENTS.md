@@ -189,7 +189,11 @@ layers guard that:
 - **`.githooks/pre-commit`** runs the guard and [gitleaks](https://github.com/gitleaks/gitleaks)
   on staged files. **`.githooks/pre-push`** mirrors CI: the test suite, the full
   guard (`--full --require-denylist`), and a gitleaks secret scan before anything leaves the
-  machine. Enable both once with `git config core.hooksPath .githooks`.
+  machine. Enable both once with `git config core.hooksPath .githooks`. Without
+  gitleaks installed the hooks warn and skip the secret scan (CI's
+  `secret-scan` job is the backstop). CI pins gitleaks (`GITLEAKS_VERSION` in
+  `.github/workflows/ci.yml`); pre-push warns when the local version differs,
+  since versions ship different default rules.
 
 ## Safety
 

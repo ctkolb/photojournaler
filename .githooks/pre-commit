@@ -34,8 +34,14 @@ fi
 "$python" -m photosmeta.leaks --staged
 
 if command -v gitleaks >/dev/null 2>&1; then
-    gitleaks git --staged --redact --no-banner ||
+    # gitleaks 8.19 replaced `protect` with `git`; pick one so a finding is
+    # reported once instead of re-running the scan.
+    if gitleaks help 2>/dev/null | grep -q '^  git '; then
+        gitleaks git --staged --redact --no-banner
+    else
         gitleaks protect --staged --redact --no-banner
+    fi
 else
-    echo "gitleaks not installed; skipping the secret scan." >&2
+    echo "WARNING: gitleaks is not installed; skipping the local secret scan." >&2
+    echo "         CI's secret-scan job is the backstop. Install: brew install gitleaks" >&2
 fi
