@@ -171,6 +171,7 @@ MUST_BE_TRACKED = (
     ".githooks/commit-msg",
     ".githooks/pre-push",
     ".github/workflows/ci.yml",
+    ".github/dependabot.yml",
     "config.example.yaml",
 )
 

@@ -1,0 +1,16 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 ctkolb
+#
+# Keeps the SHA-pinned actions in .github/workflows/ current. Dependabot
+# updates the commit SHA and its version comment together. The gitleaks and
+# actionlint binaries are pinned by version and checksum in ci.yml and are
+# bumped by hand.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns: ["*"]

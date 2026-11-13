@@ -288,6 +288,10 @@ macOS runner (required, since importing `osxphotos` needs macOS). The job is
 named **`test`**; that is the required status check enforced by branch
 protection (see [`docs/branch-protection.md`](docs/branch-protection.md)).
 
+**`workflow-lint`** runs [actionlint](https://github.com/rhysd/actionlint) on the
+workflows; actions are pinned to commit SHAs, and Dependabot
+(`.github/dependabot.yml`) proposes updates to those pins weekly.
+
 Two more jobs keep personal data out of the repository: **`personal-data-guard`**
 refuses data files (`*.sqlite`, `*.json`, `*.csv`, `*.jpg`, `*.heic`, …) outside
 `tests/fixtures/`, any denylisted term, machine-specific paths, and a
