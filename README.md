@@ -288,16 +288,22 @@ macOS runner (required, since importing `osxphotos` needs macOS). The job is
 named **`test`**; that is the required status check enforced by branch
 protection (see [`docs/branch-protection.md`](docs/branch-protection.md)).
 
+**`workflow-lint`** runs [actionlint](https://github.com/rhysd/actionlint) on the
+workflows; actions are pinned to commit SHAs, and Dependabot
+(`.github/dependabot.yml`) proposes updates to those pins weekly.
+
 Two more jobs keep personal data out of the repository: **`personal-data-guard`**
 refuses data files (`*.sqlite`, `*.json`, `*.csv`, `*.jpg`, `*.heic`, …) outside
 `tests/fixtures/`, any denylisted term, machine-specific paths, and a
 `.gitignore` regression, and **`secret-scan`** runs
-[gitleaks](https://github.com/gitleaks/gitleaks) over the full git history,
-from a pinned, checksum-verified release. `.githooks/pre-commit` runs
-the guard and gitleaks on staged files; `.githooks/pre-push` runs the full guard
-before anything leaves the machine — the test suite, the guard over every
-tracked file, the `.gitignore` self-test, the branch/commit-message history
-scan, and a gitleaks scan. Enable both once with
+[gitleaks](https://github.com/gitleaks/gitleaks) over the full git history and
+every commit message, from a pinned, checksum-verified release.
+`.githooks/pre-commit` runs the guard and gitleaks on staged files and
+`.githooks/commit-msg` runs gitleaks on the message; `.githooks/pre-push` runs
+the full guard before anything leaves the machine — the test suite, the guard
+over every tracked file, the `.gitignore` self-test, the branch, commit-message,
+and commit-diff history scan, and gitleaks over history and messages. Enable
+all three once with
 `git config core.hooksPath .githooks`. The denylist lives outside the repo, so
 it never leaks — see [`AGENTS.md`](AGENTS.md#keeping-personal-data-out-of-git).
 
@@ -306,7 +312,8 @@ it never leaks — see [`AGENTS.md`](AGENTS.md#keeping-personal-data-out-of-git)
 - **Application vs. content.** The repo holds the app; real exports, journals,
   and locations are content and are never tracked. `photosmeta/leaks.py` — run by
   the pre-commit/pre-push hooks and CI — fails the build if data files,
-  denylisted terms, machine paths, or secrets would be committed.
+  credential files, denylisted terms, machine paths, or private-key blocks would
+  be committed. Secrets in general (tokens, API keys) are gitleaks' job.
 - **Identity-free app.** The code and committed docs never hardcode a person's
   name, home address, or machine path. Owner-specific values live in a gitignored
   config or a denylist kept outside the repository.

@@ -164,9 +164,13 @@ layers guard that:
 
 - **`.gitignore`** covers the generated-output names (`report*.html`,
   `photos*.json`, `photos*.csv`, `journal*.md`, `journal*.html`, `/photos/`,
-  `vault/`, `config*.yaml`, `*.photoslibrary/`) plus a stray `CLAUDE.md`.
+  `vault/`, `config*.yaml`, `*.photoslibrary/`), credentials (`.env*`, `*.pem`,
+  `*.key`, `*.p12`, `*.pfx`), stray denylist copies (`denylist*.txt`), and local
+  agent files (`CLAUDE.md`, `opencode.jsonc`).
 - **`photosmeta/leaks.py`** refuses data files (`*.sqlite`, `*.json`, `*.csv`,
-  `*.jpg`, `*.heic`, …) outside   `tests/fixtures/`, any denylisted term, and machine-specific patterns (macOS
+  `*.jpg`, `*.heic`, RAW, `*.aae`, `*.gpx`/`*.kml`, archives, …), credential
+  files, and denylist copies outside `tests/fixtures/`, any file over 1 MiB, any
+  denylisted term, and machine-specific patterns (macOS
   and Linux home paths, macOS `Library` paths, iCloud vault paths, private-key
   blocks). The denylist (town, real names, home
   coordinates) lives *outside* the repo — at `--denylist`,
@@ -184,12 +188,15 @@ layers guard that:
   them without the denylist.
 - **`--gitignore`** self-tests the rules: the generated-output and data paths
   must stay ignored and the app files must not be. **`--history`** scans the
-  branch name and the commit messages since the default branch for denylisted
-  terms.
+  branch name, the commit messages, and the lines and file names each commit
+  added since the default branch for denylisted terms, so a term added and
+  later removed is still caught. File names in the tree are scanned too.
 - **`.githooks/pre-commit`** runs the guard and [gitleaks](https://github.com/gitleaks/gitleaks)
-  on staged files. **`.githooks/pre-push`** mirrors CI: the test suite, the full
-  guard (`--full --require-denylist`), and a gitleaks secret scan before anything leaves the
-  machine. Enable both once with `git config core.hooksPath .githooks`. Without
+  on staged files, and **`.githooks/commit-msg`** runs gitleaks on the commit
+  message (gitleaks scans diffs, not messages). **`.githooks/pre-push`** mirrors
+  CI: the test suite, the full guard (`--full --require-denylist`), and gitleaks
+  over the full history and every commit message before anything leaves the
+  machine. Enable all three once with `git config core.hooksPath .githooks`. Without
   gitleaks installed the hooks warn and skip the secret scan (CI's
   `secret-scan` job is the backstop). CI pins gitleaks (`GITLEAKS_VERSION` in
   `.github/workflows/ci.yml`); pre-push warns when the local version differs,

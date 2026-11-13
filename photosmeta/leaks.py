@@ -5,7 +5,9 @@
 Five checks keep personal data out of the repository:
 
 1. **Path guard** — data-bearing files (``*.sqlite``, ``*.json``, ``*.csv``,
-   ``*.jpg``, ``*.heic``, …) are refused outside ``tests/fixtures/``.
+   ``*.jpg``, ``*.heic``, …), credentials (``*.pem``, ``*.key``, ``.env``), and
+   denylist copies (``denylist*.txt``) are refused outside ``tests/fixtures/``,
+   and any file over ``MAX_FILE_BYTES`` (1 MiB) is refused anywhere.
 2. **Denylist guard** — forbidden terms (a town, a real name, home
    coordinates) are refused anywhere. The list itself must never be committed,
    so it is read at runtime from outside the repo, or stored as ``sha256:``
@@ -19,8 +21,10 @@ Five checks keep personal data out of the repository:
    exempt.
 4. **``.gitignore`` self-test** (``--gitignore``) — the generated-output and
    data paths are still ignored, and the app files are not.
-5. **History guard** (``--history``) — denylisted terms in the branch name and
-   in the commit messages since the default branch.
+5. **History guard** (``--history``) — denylisted terms in the branch name,
+   and in the commit messages and the lines and file names each commit added
+   since the default branch (so a term added and later removed is still
+   caught). File names in the tree are scanned too.
 
 Run it as ``python -m photosmeta.leaks --staged`` (pre-commit) or
 ``python -m photosmeta.leaks --full`` (all tracked files, the ``.gitignore``
@@ -40,6 +44,7 @@ Print hashed entries with ``python -m photosmeta.leaks --hash TERM``.
 from __future__ import annotations
 
 import argparse
+import fnmatch
 import hashlib
 import os
 import re
@@ -62,8 +67,44 @@ FORBIDDEN_SUFFIXES = (
     ".tiff",
     ".mov",
     ".mp4",
+    ".m4v",
+    ".avi",
+    ".3gp",
+    ".gif",
+    ".webp",
+    # Camera RAW and Photos edit sidecars.
+    ".dng",
+    ".cr2",
+    ".cr3",
+    ".nef",
+    ".arw",
+    ".aae",
+    # Location tracks.
+    ".gpx",
+    ".kml",
+    ".kmz",
+    # Other databases and archives that could carry an export.
+    ".db",
+    ".sqlite3",
+    ".zip",
+    ".tar",
+    ".gz",
+    ".7z",
     ".photoslibrary",
+    # Credentials.
+    ".pem",
+    ".key",
+    ".p12",
+    ".pfx",
 )
+# File names refused outside tests/fixtures/ whatever their suffix: the
+# denylist (its hashed entries match nothing, so a content scan cannot catch
+# a committed copy) and environment files.
+FORBIDDEN_NAMES = ("denylist*.txt", ".env", ".env.*")
+
+# Any tracked file larger than this is refused: source and docs stay far
+# below it, so a large file is almost always an export or media.
+MAX_FILE_BYTES = 1024 * 1024
 
 FIXTURE_PARTS = ("tests", "fixtures")
 _TOKEN_RE = re.compile(r"[A-Za-z0-9@._'-]+")
@@ -106,6 +147,15 @@ MUST_BE_IGNORED = (
     "config.yml",
     "Our.photoslibrary/database",
     "CLAUDE.md",
+    "opencode.jsonc",
+    ".env",
+    ".env.local",
+    "server.pem",
+    "signing.key",
+    "cert.p12",
+    "cert.pfx",
+    "denylist.txt",
+    "denylist-ci.txt",
 )
 MUST_BE_TRACKED = (
     "photosmeta/leaks.py",
@@ -118,8 +168,10 @@ MUST_BE_TRACKED = (
     "LICENSE",
     "requirements.txt",
     ".githooks/pre-commit",
+    ".githooks/commit-msg",
     ".githooks/pre-push",
     ".github/workflows/ci.yml",
+    ".github/dependabot.yml",
     "config.example.yaml",
 )
 
@@ -136,11 +188,15 @@ def _under_fixtures(parts: tuple[str, ...]) -> bool:
 
 
 def is_forbidden_path(path: str, suffixes: tuple[str, ...] = FORBIDDEN_SUFFIXES) -> bool:
-    """True when ``path`` is a data file outside ``tests/fixtures/``."""
-    if _under_fixtures(_parts(path)):
+    """True when ``path`` is a data or credential file outside ``tests/fixtures/``."""
+    parts = _parts(path)
+    if _under_fixtures(parts):
         return False
     lowered = path.lower()
-    return any(lowered.endswith(suffix) for suffix in suffixes)
+    name = parts[-1].lower() if parts else lowered
+    return any(lowered.endswith(suffix) for suffix in suffixes) or any(
+        fnmatch.fnmatchcase(name, pattern) for pattern in FORBIDDEN_NAMES
+    )
 
 
 def hash_token(token: str) -> str:
@@ -197,9 +253,18 @@ def _default_denylist_path() -> Path | None:
 
 
 def scan_text(
-    path: str, text: str, literals: list[str], hashed: set[str]
+    path: str,
+    text: str,
+    literals: list[str],
+    hashed: set[str],
+    line_numbers: list[int] | None = None,
 ) -> list[str]:
-    """Return human-readable findings for one file's contents."""
+    """Return human-readable findings for one file's contents.
+
+    ``line_numbers`` gives each line's number in the file when ``text`` holds
+    only some of its lines (the lines a commit added); by default lines count
+    from 1.
+    """
     findings: list[str] = []
     lowered = text.lower()
     for term in literals:
@@ -208,7 +273,8 @@ def scan_text(
 
     if hashed:
         seen: set[str] = set()
-        for lineno, line in enumerate(text.splitlines(), start=1):
+        for index, line in enumerate(text.splitlines()):
+            lineno = line_numbers[index] if line_numbers else index + 1
             for token in _TOKEN_RE.findall(line):
                 for variant in token_variants(token):
                     digest = hash_token(variant)
@@ -286,10 +352,16 @@ def check(
         raw = read(name, root)
         if raw is None:
             continue
+        if len(raw) > MAX_FILE_BYTES:
+            violations.append(
+                f"{name}: {len(raw)} bytes, over the {MAX_FILE_BYTES} byte limit"
+            )
+            continue
         if b"\x00" in raw:
             continue
         text = raw.decode("utf-8", errors="replace")
         violations.extend(scan_text(name, text, literals, hashed))
+        violations.extend(scan_text(f"file name {name}", name, literals, hashed))
         if name not in PATTERN_EXEMPT:
             violations.extend(scan_patterns(name, text))
     return violations
@@ -325,10 +397,72 @@ def _git_is_ignored(path: str, root: Path = Path(".")) -> bool:
     return result.returncode == 0
 
 
+_HUNK_RE = re.compile(r"^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@")
+
+
+def added_lines(diff: str) -> dict[str, list[tuple[int, str]]]:
+    """Map each file in a ``--unified=0`` diff to the ``(line, text)`` it adds.
+
+    Headers are only read between ``diff --git`` and the first hunk, so an
+    added line that itself starts with ``++`` is not mistaken for one.
+    Deleted files (``+++ /dev/null``) add nothing.
+    """
+    added: dict[str, list[tuple[int, str]]] = {}
+    path: str | None = None
+    in_header = False
+    lineno = 0
+    for line in diff.splitlines():
+        if line.startswith("diff --git "):
+            in_header, path = True, None
+        elif in_header and line.startswith("+++ "):
+            target = line[4:].strip('"')
+            path = target[2:] if target.startswith("b/") else None
+        elif line.startswith("@@"):
+            in_header = False
+            match = _HUNK_RE.match(line)
+            lineno = int(match.group(1)) if match else 0
+        elif not in_header and path is not None and line.startswith("+"):
+            added.setdefault(path, []).append((lineno, line[1:]))
+            lineno += 1
+    return added
+
+
+def scan_commits(
+    base: str, literals: list[str], hashed: set[str], root: Path = Path(".")
+) -> list[str]:
+    """Scan the lines and file names each commit since ``base`` added.
+
+    The tree scan sees only the final state, so a term committed and then
+    removed in a later commit would otherwise stay in history unnoticed.
+    """
+    if not literals and not hashed:
+        return []
+    findings: list[str] = []
+    revs = _git_capture("rev-list", "--no-merges", "--reverse", f"{base}..HEAD", root=root)
+    for sha in revs.stdout.split():
+        diff = _git_capture(
+            "-c", "core.quotePath=false", "show", "--format=", "--unified=0",
+            "--no-color", "--no-ext-diff", sha, root=root,
+        ).stdout
+        for path, lines in added_lines(diff).items():
+            label = f"commit {sha[:7]} {path}"
+            findings.extend(scan_text(f"{label} (file name)", path, literals, hashed))
+            findings.extend(
+                scan_text(
+                    label,
+                    "\n".join(text for _, text in lines),
+                    literals,
+                    hashed,
+                    line_numbers=[n for n, _ in lines],
+                )
+            )
+    return findings
+
+
 def scan_history(
     literals: list[str], hashed: set[str], root: Path = Path(".")
 ) -> list[str]:
-    """Scan the branch name and commits since the default branch for terms."""
+    """Scan the branch name and the commits since the default branch for terms."""
     findings: list[str] = []
 
     # A pull-request checkout in CI is a detached HEAD; GitHub names the
@@ -359,6 +493,7 @@ def scan_history(
                 hashed,
             )
         )
+    findings.extend(scan_commits(base, literals, hashed, root=root))
     return findings
 
 
@@ -435,7 +570,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"error: {violation}", file=sys.stderr)
     if violations:
         print(
-            f"\n{len(violations)} personal-data finding(s); commit blocked.",
+            f"\n{len(violations)} personal-data finding(s); fix them before committing or pushing.",
             file=sys.stderr,
         )
         return 1

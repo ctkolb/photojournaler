@@ -1,0 +1,21 @@
+#!/bin/sh
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 ctkolb
+#
+# Commit-message guard: gitleaks scans diffs, not messages, so a secret pasted
+# into a message would otherwise go unnoticed. Enable the hooks with:
+#
+#   git config core.hooksPath .githooks
+
+set -eu
+
+if command -v gitleaks >/dev/null 2>&1; then
+    if gitleaks help 2>/dev/null | grep -q '^  stdin '; then
+        gitleaks stdin --redact --no-banner --log-level warn <"$1"
+    else
+        echo "WARNING: this gitleaks has no 'stdin' command; skipping the commit-message scan." >&2
+    fi
+else
+    echo "WARNING: gitleaks is not installed; skipping the commit-message secret scan." >&2
+    echo "         CI's secret-scan job is the backstop. Install: brew install gitleaks" >&2
+fi

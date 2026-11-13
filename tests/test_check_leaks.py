@@ -18,6 +18,22 @@ def test_is_forbidden_path_flags_data_files():
     assert leaks.is_forbidden_path("out/export.csv")
     assert leaks.is_forbidden_path("IMG_0001.HEIC")
     assert leaks.is_forbidden_path("clip.mp4")
+    assert leaks.is_forbidden_path("IMG_0001.AAE")
+    assert leaks.is_forbidden_path("raw/IMG_0001.dng")
+    assert leaks.is_forbidden_path("walks/2025-06-01.gpx")
+    assert leaks.is_forbidden_path("trip.kmz")
+    assert leaks.is_forbidden_path("backup/library.zip")
+
+
+def test_is_forbidden_path_flags_credentials_and_denylists():
+    assert leaks.is_forbidden_path("deploy/server.pem")
+    assert leaks.is_forbidden_path("signing.KEY")
+    assert leaks.is_forbidden_path(".env")
+    assert leaks.is_forbidden_path("app/.env.production")
+    assert leaks.is_forbidden_path("denylist.txt")
+    assert leaks.is_forbidden_path("notes/denylist-backup.txt")
+    assert not leaks.is_forbidden_path("requirements.txt")
+    assert not leaks.is_forbidden_path("docs/environment.md")
 
 
 def test_is_forbidden_path_allows_fixtures_and_source():
@@ -71,6 +87,16 @@ def test_check_scans_text_files(tmp_path: Path):
     (tmp_path / "notes.md").write_text("home in Fairview", encoding="utf-8")
     violations = leaks.check(["notes.md"], ["Fairview"], set(), root=tmp_path)
     assert violations == ["notes.md: matches a denylisted term"]
+
+
+def test_check_refuses_oversized_files(tmp_path: Path):
+    (tmp_path / "dump.txt").write_bytes(b"a" * (leaks.MAX_FILE_BYTES + 1))
+    (tmp_path / "ok.txt").write_bytes(b"a" * leaks.MAX_FILE_BYTES)
+    violations = leaks.check(["dump.txt", "ok.txt"], [], set(), root=tmp_path)
+    assert violations == [
+        f"dump.txt: {leaks.MAX_FILE_BYTES + 1} bytes, "
+        f"over the {leaks.MAX_FILE_BYTES} byte limit"
+    ]
 
 
 def test_check_skips_binary_files(tmp_path: Path):
@@ -248,3 +274,77 @@ def test_require_denylist_passes_with_one(tmp_path: Path, monkeypatch):
     clean.write_text("a walk by the river\n", encoding="utf-8")
 
     assert leaks.main(["--require-denylist", str(clean)]) == 0
+
+
+def test_added_lines_tracks_files_and_line_numbers():
+    diff = "\n".join([
+        "diff --git a/story.md b/story.md",
+        "--- a/story.md",
+        "+++ b/story.md",
+        "@@ -2,0 +3,2 @@ heading",
+        "+first added",
+        "++++ an added line that looks like a header",
+        "diff --git a/old.md b/old.md",
+        "--- a/old.md",
+        "+++ /dev/null",
+        "@@ -1 +0,0 @@",
+        "-gone",
+    ])
+    assert leaks.added_lines(diff) == {
+        "story.md": [(3, "first added"), (4, "+++ an added line that looks like a header")]
+    }
+
+
+def test_scan_text_uses_given_line_numbers():
+    hashed = {leaks.hash_token("Fairview")}
+    findings = leaks.scan_text(
+        "story.md", "clean\nin Fairview", [], hashed, line_numbers=[7, 12]
+    )
+    assert findings == ["story.md:12: matches a hashed denylist entry"]
+
+
+def test_check_scans_file_names(tmp_path: Path):
+    (tmp_path / "Fairview-notes.md").write_text("clean\n", encoding="utf-8")
+    hashed = {leaks.hash_token("Fairview")}
+    violations = leaks.check(["Fairview-notes.md"], [], hashed, root=tmp_path)
+    assert violations == [
+        "file name Fairview-notes.md:1: matches a hashed denylist entry"
+    ]
+
+
+def test_scan_history_catches_a_term_added_then_removed(tmp_path: Path, monkeypatch):
+    monkeypatch.delenv("GITHUB_HEAD_REF", raising=False)
+    repo = _git_repo(tmp_path)
+    _git(repo, "switch", "-q", "-c", "notes")
+    story = repo / "story.md"
+    story.write_text("a walk\nvisit Fairview\n", encoding="utf-8")
+    _git(repo, "add", "story.md")
+    _git(repo, "commit", "-qm", "add story")
+    story.write_text("a walk\nvisit town\n", encoding="utf-8")
+    _git(repo, "commit", "-qam", "reword story")
+    added = subprocess.run(
+        ["git", "-C", str(repo), "rev-parse", "--short=7", "HEAD~1"],
+        capture_output=True, text=True, check=True,
+    ).stdout.strip()
+    hashed = {leaks.hash_token("Fairview")}
+
+    assert leaks.check(["story.md"], [], hashed, root=repo) == []
+    assert leaks.scan_history([], hashed, root=repo) == [
+        f"commit {added} story.md:2: matches a hashed denylist entry"
+    ]
+
+
+def test_scan_commits_skips_without_a_denylist(tmp_path: Path):
+    repo = _git_repo(tmp_path)
+    assert leaks.scan_commits("main", [], set(), root=repo) == []
+
+
+def test_main_summary_does_not_assume_a_commit(tmp_path: Path, monkeypatch, capsys):
+    _isolate_denylist(tmp_path, monkeypatch)
+    (tmp_path / "photos.sqlite").write_bytes(b"")
+    monkeypatch.chdir(tmp_path)
+
+    assert leaks.main(["photos.sqlite"]) == 1
+    err = capsys.readouterr().err
+    assert "1 personal-data finding(s); fix them before committing or pushing." in err
+    assert "commit blocked" not in err

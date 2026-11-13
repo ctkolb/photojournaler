@@ -21,5 +21,15 @@ config*.yml
 !config.example.yaml
 *.photoslibrary/
 
+# Credentials, and the personal-data denylist, which lives outside the repo.
+.env
+.env.*
+*.pem
+*.key
+*.p12
+*.pfx
+denylist*.txt
+
 # Local agent/tooling files that mirror docs already in the repo.
 CLAUDE.md
+opencode.jsonc

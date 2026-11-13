@@ -6,9 +6,11 @@ Goal: no commit can land on `main` unless all CI status checks in
 - **`test`** — the hermetic pytest suite.
 - **`personal-data-guard`** — refuses data files, denylisted terms, machine
   paths, generated outputs, and denylisted terms in history.
-- **`secret-scan`** — gitleaks over the full git history.
+- **`secret-scan`** — gitleaks over the full git history and every commit
+  message.
+- **`workflow-lint`** — actionlint over `.github/workflows/`.
 
-All three are required so a data or secret leak cannot be merged even if the
+All four are required so a data or secret leak cannot be merged even if the
 local hooks were skipped.
 
 ## Prerequisites
@@ -44,7 +46,8 @@ gh api --method POST repos/ctkolb/photojournaler/rulesets --input - <<'JSON'
         "required_status_checks": [
           { "context": "test" },
           { "context": "personal-data-guard" },
-          { "context": "secret-scan" }
+          { "context": "secret-scan" },
+          { "context": "workflow-lint" }
         ]
       }
     },
@@ -64,7 +67,7 @@ JSON
 ```
 
 - **required_status_checks** — blocks merge until `test`, `personal-data-guard`,
-  and `secret-scan` are all green.
+  `secret-scan`, and `workflow-lint` are all green.
 - **strict** — also requires the branch to be up to date with `main` first.
 - **pull_request** with `0` approvals — forces a PR (and therefore the check)
   but still lets a solo maintainer self-merge once checks pass.
@@ -77,7 +80,7 @@ gh api --method PUT repos/ctkolb/photojournaler/branches/main/protection --input
 {
   "required_status_checks": {
     "strict": true,
-    "contexts": ["test", "personal-data-guard", "secret-scan"]
+    "contexts": ["test", "personal-data-guard", "secret-scan", "workflow-lint"]
   },
   "enforce_admins": true,
   "required_pull_request_reviews": { "required_approving_review_count": 1 },
