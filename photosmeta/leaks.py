@@ -168,6 +168,7 @@ MUST_BE_TRACKED = (
     "LICENSE",
     "requirements.txt",
     ".githooks/pre-commit",
+    ".githooks/commit-msg",
     ".githooks/pre-push",
     ".github/workflows/ci.yml",
     "config.example.yaml",

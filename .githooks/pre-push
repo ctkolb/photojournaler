@@ -35,6 +35,11 @@ if command -v gitleaks >/dev/null 2>&1; then
     else
         gitleaks detect --redact --no-banner
     fi
+    # gitleaks scans diffs, not commit messages; scan every message too.
+    if gitleaks help 2>/dev/null | grep -q '^  stdin '; then
+        echo "pre-push: scanning commit messages for secrets..." >&2
+        git log --format=%B | gitleaks stdin --redact --no-banner --log-level warn
+    fi
     # CI pins gitleaks; another version ships different default rules.
     pinned="$(sed -n 's/^ *GITLEAKS_VERSION: *"\([^"]*\)".*/\1/p' .github/workflows/ci.yml)"
     local_version="$(gitleaks version 2>/dev/null | sed 's/^v//')"

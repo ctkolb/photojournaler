@@ -192,9 +192,11 @@ layers guard that:
   added since the default branch for denylisted terms, so a term added and
   later removed is still caught. File names in the tree are scanned too.
 - **`.githooks/pre-commit`** runs the guard and [gitleaks](https://github.com/gitleaks/gitleaks)
-  on staged files. **`.githooks/pre-push`** mirrors CI: the test suite, the full
-  guard (`--full --require-denylist`), and a gitleaks secret scan before anything leaves the
-  machine. Enable both once with `git config core.hooksPath .githooks`. Without
+  on staged files, and **`.githooks/commit-msg`** runs gitleaks on the commit
+  message (gitleaks scans diffs, not messages). **`.githooks/pre-push`** mirrors
+  CI: the test suite, the full guard (`--full --require-denylist`), and gitleaks
+  over the full history and every commit message before anything leaves the
+  machine. Enable all three once with `git config core.hooksPath .githooks`. Without
   gitleaks installed the hooks warn and skip the secret scan (CI's
   `secret-scan` job is the backstop). CI pins gitleaks (`GITLEAKS_VERSION` in
   `.github/workflows/ci.yml`); pre-push warns when the local version differs,
