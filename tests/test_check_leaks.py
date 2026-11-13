@@ -20,6 +20,17 @@ def test_is_forbidden_path_flags_data_files():
     assert leaks.is_forbidden_path("clip.mp4")
 
 
+def test_is_forbidden_path_flags_credentials_and_denylists():
+    assert leaks.is_forbidden_path("deploy/server.pem")
+    assert leaks.is_forbidden_path("signing.KEY")
+    assert leaks.is_forbidden_path(".env")
+    assert leaks.is_forbidden_path("app/.env.production")
+    assert leaks.is_forbidden_path("denylist.txt")
+    assert leaks.is_forbidden_path("notes/denylist-backup.txt")
+    assert not leaks.is_forbidden_path("requirements.txt")
+    assert not leaks.is_forbidden_path("docs/environment.md")
+
+
 def test_is_forbidden_path_allows_fixtures_and_source():
     assert not leaks.is_forbidden_path("tests/fixtures/photos.json")
     assert not leaks.is_forbidden_path("tests/fixtures/photo.jpg")

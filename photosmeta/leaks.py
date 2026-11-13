@@ -5,7 +5,8 @@
 Five checks keep personal data out of the repository:
 
 1. **Path guard** — data-bearing files (``*.sqlite``, ``*.json``, ``*.csv``,
-   ``*.jpg``, ``*.heic``, …) are refused outside ``tests/fixtures/``.
+   ``*.jpg``, ``*.heic``, …), credentials (``*.pem``, ``*.key``, ``.env``), and
+   denylist copies (``denylist*.txt``) are refused outside ``tests/fixtures/``.
 2. **Denylist guard** — forbidden terms (a town, a real name, home
    coordinates) are refused anywhere. The list itself must never be committed,
    so it is read at runtime from outside the repo, or stored as ``sha256:``
@@ -40,6 +41,7 @@ Print hashed entries with ``python -m photosmeta.leaks --hash TERM``.
 from __future__ import annotations
 
 import argparse
+import fnmatch
 import hashlib
 import os
 import re
@@ -63,7 +65,16 @@ FORBIDDEN_SUFFIXES = (
     ".mov",
     ".mp4",
     ".photoslibrary",
+    # Credentials.
+    ".pem",
+    ".key",
+    ".p12",
+    ".pfx",
 )
+# File names refused outside tests/fixtures/ whatever their suffix: the
+# denylist (its hashed entries match nothing, so a content scan cannot catch
+# a committed copy) and environment files.
+FORBIDDEN_NAMES = ("denylist*.txt", ".env", ".env.*")
 
 FIXTURE_PARTS = ("tests", "fixtures")
 _TOKEN_RE = re.compile(r"[A-Za-z0-9@._'-]+")
@@ -107,6 +118,14 @@ MUST_BE_IGNORED = (
     "Our.photoslibrary/database",
     "CLAUDE.md",
     "opencode.jsonc",
+    ".env",
+    ".env.local",
+    "server.pem",
+    "signing.key",
+    "cert.p12",
+    "cert.pfx",
+    "denylist.txt",
+    "denylist-ci.txt",
 )
 MUST_BE_TRACKED = (
     "photosmeta/leaks.py",
@@ -137,11 +156,15 @@ def _under_fixtures(parts: tuple[str, ...]) -> bool:
 
 
 def is_forbidden_path(path: str, suffixes: tuple[str, ...] = FORBIDDEN_SUFFIXES) -> bool:
-    """True when ``path`` is a data file outside ``tests/fixtures/``."""
-    if _under_fixtures(_parts(path)):
+    """True when ``path`` is a data or credential file outside ``tests/fixtures/``."""
+    parts = _parts(path)
+    if _under_fixtures(parts):
         return False
     lowered = path.lower()
-    return any(lowered.endswith(suffix) for suffix in suffixes)
+    name = parts[-1].lower() if parts else lowered
+    return any(lowered.endswith(suffix) for suffix in suffixes) or any(
+        fnmatch.fnmatchcase(name, pattern) for pattern in FORBIDDEN_NAMES
+    )
 
 
 def hash_token(token: str) -> str:

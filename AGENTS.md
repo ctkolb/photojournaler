@@ -164,9 +164,12 @@ layers guard that:
 
 - **`.gitignore`** covers the generated-output names (`report*.html`,
   `photos*.json`, `photos*.csv`, `journal*.md`, `journal*.html`, `/photos/`,
-  `vault/`, `config*.yaml`, `*.photoslibrary/`) plus a stray `CLAUDE.md`.
+  `vault/`, `config*.yaml`, `*.photoslibrary/`), credentials (`.env*`, `*.pem`,
+  `*.key`, `*.p12`, `*.pfx`), stray denylist copies (`denylist*.txt`), and local
+  agent files (`CLAUDE.md`, `opencode.jsonc`).
 - **`photosmeta/leaks.py`** refuses data files (`*.sqlite`, `*.json`, `*.csv`,
-  `*.jpg`, `*.heic`, …) outside   `tests/fixtures/`, any denylisted term, and machine-specific patterns (macOS
+  `*.jpg`, `*.heic`, …), credential files, and denylist copies outside
+  `tests/fixtures/`, any denylisted term, and machine-specific patterns (macOS
   and Linux home paths, macOS `Library` paths, iCloud vault paths, private-key
   blocks). The denylist (town, real names, home
   coordinates) lives *outside* the repo — at `--denylist`,
