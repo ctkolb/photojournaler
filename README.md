@@ -43,7 +43,7 @@ single file:
 
   ```markdown
   - date:: 2026-04-11 · weekday:: Saturday · device:: iPhone 16 Pro · trip:: prague-paris-2026 · away:: true
-    places:: 16th Arr. — Paris (48.8566, 2.3522); Eiffel Tower — Paris (48.8584, 2.2945) · people:: Casey · photos:: 41 · videos:: 6 · favorites:: 2 · tz:: UTC+02:00
+    places:: 16th Arr. — Paris (48.8566, 2.3522); Eiffel Tower — Paris (48.8584, 2.2945) · people:: Jordan · photos:: 41 · videos:: 6 · favorites:: 2 · tz:: UTC+02:00
   ```
 
   Fields: ISO `date`, `weekday`, `device`, `trip` (slug), `away` (far from home),
@@ -292,7 +292,8 @@ Two more jobs keep personal data out of the repository: **`personal-data-guard`*
 refuses data files (`*.sqlite`, `*.json`, `*.csv`, `*.jpg`, `*.heic`, …) outside
 `tests/fixtures/`, any denylisted term, machine-specific paths, and a
 `.gitignore` regression, and **`secret-scan`** runs
-[gitleaks](https://github.com/gitleaks/gitleaks). `.githooks/pre-commit` runs
+[gitleaks](https://github.com/gitleaks/gitleaks) over the full git history,
+from a pinned, checksum-verified release. `.githooks/pre-commit` runs
 the guard and gitleaks on staged files; `.githooks/pre-push` runs the full guard
 before anything leaves the machine — the test suite, the guard over every
 tracked file, the `.gitignore` self-test, the branch/commit-message history

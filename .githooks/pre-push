@@ -22,12 +22,27 @@ echo "pre-push: running tests..." >&2
 "$python" -m pytest
 
 echo "pre-push: checking tracked files, .gitignore rules, and history..." >&2
-"$python" -m photosmeta.leaks --full
+# Fails when no denylist is configured: without one the town, names, and home
+# coordinates are not checked at all.
+"$python" -m photosmeta.leaks --full --require-denylist
 
 if command -v gitleaks >/dev/null 2>&1; then
-    echo "pre-push: scanning for secrets..." >&2
-    gitleaks git --redact --no-banner ||
+    echo "pre-push: scanning history for secrets..." >&2
+    # gitleaks 8.19 replaced `detect` with `git`; pick one so a finding is
+    # reported once instead of re-running the scan.
+    if gitleaks help 2>/dev/null | grep -q '^  git '; then
+        gitleaks git --redact --no-banner
+    else
         gitleaks detect --redact --no-banner
+    fi
+    # CI pins gitleaks; another version ships different default rules.
+    pinned="$(sed -n 's/^ *GITLEAKS_VERSION: *"\([^"]*\)".*/\1/p' .github/workflows/ci.yml)"
+    local_version="$(gitleaks version 2>/dev/null | sed 's/^v//')"
+    if [ -n "$pinned" ] && [ "$local_version" != "$pinned" ]; then
+        echo "WARNING: local gitleaks $local_version differs from CI's pinned $pinned;" >&2
+        echo "         a clean local scan does not guarantee a clean CI scan." >&2
+    fi
 else
-    echo "gitleaks not installed; skipping the secret scan." >&2
+    echo "WARNING: gitleaks is not installed; skipping the local secret scan." >&2
+    echo "         CI's secret-scan job is the backstop. Install: brew install gitleaks" >&2
 fi

@@ -176,15 +176,24 @@ layers guard that:
   `python -m photosmeta.leaks --staged` (pre-commit), `--all` (tracked files),
   or `--full` (tracked files + the `.gitignore` self-test + history);
   `--gitignore` and `--history` can be run on their own. Generate hashes with
-  `python -m photosmeta.leaks --hash TERM`.
+  `python -m photosmeta.leaks --hash TERM`. `--staged` scans the staged (index)
+  copy of each file, including renames. With no denylist the guard warns and
+  runs the other checks; `--require-denylist` (pre-push and CI) fails instead,
+  so set up the local denylist file and the `PHOTOJOURNALER_DENYLIST` repository
+  secret before pushing. Pull requests from forks get no secrets, so CI runs
+  them without the denylist.
 - **`--gitignore`** self-tests the rules: the generated-output and data paths
   must stay ignored and the app files must not be. **`--history`** scans the
   branch name and the commit messages since the default branch for denylisted
   terms.
 - **`.githooks/pre-commit`** runs the guard and [gitleaks](https://github.com/gitleaks/gitleaks)
   on staged files. **`.githooks/pre-push`** mirrors CI: the test suite, the full
-  guard (`--full`), and a gitleaks secret scan before anything leaves the
-  machine. Enable both once with `git config core.hooksPath .githooks`.
+  guard (`--full --require-denylist`), and a gitleaks secret scan before anything leaves the
+  machine. Enable both once with `git config core.hooksPath .githooks`. Without
+  gitleaks installed the hooks warn and skip the secret scan (CI's
+  `secret-scan` job is the backstop). CI pins gitleaks (`GITLEAKS_VERSION` in
+  `.github/workflows/ci.yml`); pre-push warns when the local version differs,
+  since versions ship different default rules.
 
 ## Safety
 
