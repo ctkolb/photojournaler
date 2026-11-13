@@ -106,6 +106,7 @@ MUST_BE_IGNORED = (
     "config.yml",
     "Our.photoslibrary/database",
     "CLAUDE.md",
+    "opencode.jsonc",
 )
 MUST_BE_TRACKED = (
     "photosmeta/leaks.py",
