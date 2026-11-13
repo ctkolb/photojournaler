@@ -938,7 +938,7 @@ def test_segment_trips_single_day_qualifies_with_airport():
 
 def test_day_index_line_has_inline_fields():
     line = j._day_index_line(
-        summary("2026-04-11T10:00:00", away=True, people=["Casey"], photos=41,
+        summary("2026-04-11T10:00:00", away=True, people=["Jordan"], photos=41,
                 videos=6, favorites=2, timezones=["GMT+0200"],
                 places=[("16th Arr. — Paris", (48.8566, 2.3522))]),
         "prague-paris-2026",
@@ -948,7 +948,7 @@ def test_day_index_line_has_inline_fields():
     assert "trip:: prague-paris-2026" in line
     assert "away:: true" in line
     assert "places:: 16th Arr. — Paris (48.8566, 2.3522)" in line
-    assert "people:: Casey" in line
+    assert "people:: Jordan" in line
     assert "photos:: 41" in line and "videos:: 6" in line and "favorites:: 2" in line
     assert "tz:: UTC+02:00" in line
 
