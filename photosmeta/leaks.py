@@ -570,7 +570,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"error: {violation}", file=sys.stderr)
     if violations:
         print(
-            f"\n{len(violations)} personal-data finding(s); commit blocked.",
+            f"\n{len(violations)} personal-data finding(s); fix them before committing or pushing.",
             file=sys.stderr,
         )
         return 1

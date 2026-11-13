@@ -312,7 +312,8 @@ it never leaks — see [`AGENTS.md`](AGENTS.md#keeping-personal-data-out-of-git)
 - **Application vs. content.** The repo holds the app; real exports, journals,
   and locations are content and are never tracked. `photosmeta/leaks.py` — run by
   the pre-commit/pre-push hooks and CI — fails the build if data files,
-  denylisted terms, machine paths, or secrets would be committed.
+  credential files, denylisted terms, machine paths, or private-key blocks would
+  be committed. Secrets in general (tokens, API keys) are gitleaks' job.
 - **Identity-free app.** The code and committed docs never hardcode a person's
   name, home address, or machine path. Owner-specific values live in a gitignored
   config or a denylist kept outside the repository.

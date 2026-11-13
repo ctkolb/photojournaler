@@ -337,3 +337,14 @@ def test_scan_history_catches_a_term_added_then_removed(tmp_path: Path, monkeypa
 def test_scan_commits_skips_without_a_denylist(tmp_path: Path):
     repo = _git_repo(tmp_path)
     assert leaks.scan_commits("main", [], set(), root=repo) == []
+
+
+def test_main_summary_does_not_assume_a_commit(tmp_path: Path, monkeypatch, capsys):
+    _isolate_denylist(tmp_path, monkeypatch)
+    (tmp_path / "photos.sqlite").write_bytes(b"")
+    monkeypatch.chdir(tmp_path)
+
+    assert leaks.main(["photos.sqlite"]) == 1
+    err = capsys.readouterr().err
+    assert "1 personal-data finding(s); fix them before committing or pushing." in err
+    assert "commit blocked" not in err
